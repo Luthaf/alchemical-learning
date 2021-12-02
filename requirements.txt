@@ -1,0 +1,7 @@
+numpy
+torch
+
+ase
+rascal @ https://github.com/cosmo-epfl/librascal/archive/ac8fecf944faa0c4b2bf0bd5b11b0236655806b7.zip
+scikit-learn
+skcosmo
