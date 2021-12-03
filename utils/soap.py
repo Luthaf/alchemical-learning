@@ -12,25 +12,27 @@ def compute_spherical_expansion_librascal(frames, hypers):
     max_angular = hypers["max_angular"]
     n_species = len(hypers["global_species"])
 
-    result = []
+    manager = calculator.transform(frames)
+    se = manager.get_features(calculator)
+
+    # Transform from [i_center, alpha, n, lm] to [i_center, lm, alpha, n]
+    se = se.reshape(se.shape[0], n_species * max_radial, -1)
+    se = se.swapaxes(1, 2)
+
+    spherical_expansion = {}
+    start = 0
+    for l in range(max_angular + 1):
+        stop = start + 2 * l + 1
+        spherical_expansion[l] = torch.tensor(se[:, start:stop, :])
+        start = stop
+
+    structures_slices = []
+    n_atoms_before = 0
     for frame in frames:
-        manager = calculator.transform(frame)
-        se = manager.get_features(calculator)
+        structures_slices.append(slice(n_atoms_before, n_atoms_before + len(frame)))
+        n_atoms_before += len(frame)
 
-        # Transform from [i_center, alpha, n, lm] to [i_center, lm, alpha, n]
-        se = se.reshape(se.shape[0], n_species * max_radial, -1)
-        se = se.swapaxes(1, 2)
-
-        spherical_expansion = {}
-        start = 0
-        for l in range(max_angular + 1):
-            stop = start + 2 * l + 1
-            spherical_expansion[l] = torch.tensor(se[:, start:stop, :])
-            start = stop
-
-        result.append(spherical_expansion)
-
-    return result
+    return spherical_expansion, structures_slices
 
 
 class PowerSpectrum(torch.nn.Module):

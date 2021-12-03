@@ -37,36 +37,32 @@ class GapModel(torch.nn.Module):
         self.kernels = kernels
         self.weights = weights
 
-    def forward(self, power_spectrum, all_species):
+    def forward(self, power_spectrum, all_species, structures_slices):
         assert all_species.shape[0] == power_spectrum.shape[0]
 
-        energy = torch.tensor([0.0])
-        for species in self.kernels.keys():
-            kernel = self.kernels[species](
-                power_spectrum[all_species == species, :]
-            ).sum(dim=0)
+        energy = torch.zeros((len(structures_slices), 1))
+        for i, structure in enumerate(structures_slices):
+            ps = power_spectrum[structure]
+            species = all_species[structure]
 
-            energy += kernel @ self.weights[species].T
+            for s, kernel in self.kernels.items():
+                k = kernel(ps[species == s, :]).sum(dim=0)
+                energy[i] += k @ self.weights[s].T
 
         return energy
 
 
 def train_gap_model(
-    power_spectrum: List[torch.Tensor],
-    all_species,
+    power_spectrum: torch.Tensor,
+    all_species: torch.Tensor,
+    structures_slices: List[slice],
     energies,
     n_support,
     zeta=2,
     lambdas=[1e-12, 1e-12],
     jitter=1e-13,
 ):
-    energies = energies.clone().reshape((-1, 1))
-
-    support_points = select_support_points(
-        torch.vstack(power_spectrum),
-        torch.hstack(all_species),
-        n_support,
-    )
+    support_points = select_support_points(power_spectrum, all_species, n_support)
 
     kernels = {}
     for species, support in support_points.items():
@@ -77,7 +73,10 @@ def train_gap_model(
     K_NM_per_species = []
     for s, kernel in kernels.items():
         K_NM_per_frame = []
-        for ps, species in zip(power_spectrum, all_species):
+        for structure in structures_slices:
+            ps = power_spectrum[structure]
+            species = all_species[structure]
+
             K_NM_per_frame.append(kernel(ps[species == s, :]).sum(dim=0))
 
         K_NM_per_species.append(torch.vstack(K_NM_per_frame))
@@ -85,9 +84,10 @@ def train_gap_model(
     K_NM = torch.hstack(K_NM_per_species)
 
     # finish building the kernel
+    energies = energies.clone().reshape((-1, 1))
     delta = torch.std(energies)
 
-    n_atoms_per_frame = torch.tensor([ps.shape[0] for ps in power_spectrum])
+    n_atoms_per_frame = torch.tensor([s.stop - s.start for s in structures_slices])
     K_NM[:] /= lambdas[0] / delta * torch.sqrt(n_atoms_per_frame)[:, None]
     energies /= lambdas[0] / delta * torch.sqrt(n_atoms_per_frame)[:, None]
 
