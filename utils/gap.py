@@ -110,7 +110,9 @@ def train_gap_model(
     start = 0
     for species, kernel in kernels.items():
         stop = start + kernel.support_points.shape[0]
-        weights_per_species[species] = weights[start:stop, :].detach().T.clone()
+        weights_per_species[species] = (
+            weights[start:stop, :].detach().T.clone().contiguous()
+        )
         start = stop
 
     return GapModel(kernels, weights_per_species, optimizable_weights)

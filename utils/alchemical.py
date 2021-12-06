@@ -12,7 +12,7 @@ class AlchemicalCombine(torch.nn.Module):
         coupling = _species_coupling_matrix(species)
         pca = sklearn.decomposition.PCA(n_components=n_pseudo_species)
         self.combining_matrix = torch.nn.Parameter(
-            torch.tensor(pca.fit_transform(coupling))
+            torch.tensor(pca.fit_transform(coupling)).contiguous()
         )
 
     def forward(self, spherical_expansion: Dict[int, torch.Tensor]):
