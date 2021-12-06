@@ -9,7 +9,7 @@ from skcosmo.sample_selection import FPS
 class CosineKernel(torch.nn.Module):
     def __init__(self, support_points, zeta=2):
         super().__init__()
-        self.support_points = support_points
+        self.register_buffer("support_points", support_points)
         assert torch.allclose(
             torch.linalg.norm(support_points, dim=1), torch.tensor(1.0)
         )
@@ -35,7 +35,8 @@ class GapModel(torch.nn.Module):
         optimize_weights=False,
     ):
         super().__init__()
-        self.kernels = kernels
+        self.kernels = torch.nn.ModuleDict({str(s): k for s, k in kernels.items()})
+
         if optimize_weights:
             self.weights = torch.nn.ParameterDict(
                 {str(s): torch.nn.Parameter(w) for s, w in weights.items()}
@@ -46,13 +47,13 @@ class GapModel(torch.nn.Module):
     def forward(self, power_spectrum, all_species, structures_slices):
         assert all_species.shape[0] == power_spectrum.shape[0]
 
-        energy = torch.zeros((len(structures_slices), 1))
+        energy = torch.zeros((len(structures_slices), 1), device=power_spectrum.device)
         for i, structure in enumerate(structures_slices):
             ps = power_spectrum[structure]
             species = all_species[structure]
 
             for s, kernel in self.kernels.items():
-                k = kernel(ps[species == s, :]).sum(dim=0)
+                k = kernel(ps[species == int(s), :]).sum(dim=0)
                 energy[i] += k @ self.weights[str(s)].T
 
         return energy
