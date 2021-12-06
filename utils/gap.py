@@ -32,10 +32,16 @@ class GapModel(torch.nn.Module):
         self,
         kernels: Dict[int, CosineKernel],
         weights: Dict[int, torch.Tensor],
+        optimize_weights=False,
     ):
         super().__init__()
         self.kernels = kernels
-        self.weights = weights
+        if optimize_weights:
+            self.weights = torch.nn.ParameterDict(
+                {str(s): torch.nn.Parameter(w) for s, w in weights.items()}
+            )
+        else:
+            self.weights = {str(s): w for s, w in weights.items()}
 
     def forward(self, power_spectrum, all_species, structures_slices):
         assert all_species.shape[0] == power_spectrum.shape[0]
@@ -47,7 +53,7 @@ class GapModel(torch.nn.Module):
 
             for s, kernel in self.kernels.items():
                 k = kernel(ps[species == s, :]).sum(dim=0)
-                energy[i] += k @ self.weights[s].T
+                energy[i] += k @ self.weights[str(s)].T
 
         return energy
 
@@ -61,6 +67,7 @@ def train_gap_model(
     zeta=2,
     lambdas=[1e-12, 1e-12],
     jitter=1e-13,
+    optimizable_weights=False,
 ):
     support_points = select_support_points(power_spectrum, all_species, n_support)
 
@@ -106,7 +113,7 @@ def train_gap_model(
         weights_per_species[species] = weights[start:stop, :].detach().T.clone()
         start = stop
 
-    return GapModel(kernels, weights_per_species)
+    return GapModel(kernels, weights_per_species, optimizable_weights)
 
 
 def select_support_points(power_spectrum, all_species, n_support):
