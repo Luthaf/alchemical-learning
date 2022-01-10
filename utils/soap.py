@@ -45,7 +45,9 @@ class PowerSpectrum(torch.nn.Module):
         n_species_radial = spherical_expansions[0].shape[2]
         feature_size = n_angular * n_species_radial * n_species_radial
 
-        output = torch.zeros((n_environments, feature_size), device=spherical_expansions[0].device)
+        output = torch.zeros(
+            (n_environments, feature_size), device=spherical_expansions[0].device
+        )
         for l, spherical_expansion in spherical_expansions.items():
             start = l * n_species_radial * n_species_radial
             stop = (l + 1) * n_species_radial * n_species_radial

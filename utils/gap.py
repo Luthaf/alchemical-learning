@@ -7,6 +7,38 @@ from typing import Dict, List
 from skcosmo.sample_selection import FPS
 
 
+class SumStructureKernel(torch.autograd.Function):
+    @staticmethod
+    def forward(
+        ctx,
+        kernel: torch.Tensor,
+        structure_slices: List[slice],
+        training_slices: List[slice],
+    ):
+        output = torch.zeros(
+            (len(structure_slices), len(training_slices)),
+            device=kernel.device,
+        )
+        for i, structure_i in enumerate(structure_slices):
+            for j, structure_j in enumerate(training_slices):
+                output[i, j] = kernel[structure_i, structure_j].sum()
+
+        ctx.structure_slices = structure_slices
+        ctx.training_slices = training_slices
+        ctx.save_for_backward(kernel)
+
+        return output
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        grad_input = torch.zeros_like(ctx.saved_tensors[0])
+        for i, structure_i in enumerate(ctx.structure_slices):
+            for j, structure_j in enumerate(ctx.training_slices):
+                grad_input[structure_i, structure_j] = grad_output[i, j]
+
+        return grad_input, None, None
+
+
 class CosineKernel(torch.nn.Module):
     def __init__(self, support_points, zeta=2):
         super().__init__()
@@ -19,12 +51,12 @@ class CosineKernel(torch.nn.Module):
 
     def forward(self, power_spectrum: torch.Tensor):
         """Compute K_NM kernel between passed environments and support points"""
-        normalized_power_spectrum = power_spectrum / torch.linalg.norm(
-            power_spectrum, dim=1, keepdim=True
-        )
+        norm = torch.linalg.norm(power_spectrum, dim=1, keepdim=True)
+        normalized_power_spectrum = power_spectrum / norm
         return torch.pow(normalized_power_spectrum @ self.support_points.T, self.zeta)
 
     def compute_KMM(self):
+        # suport points are already normalized
         return torch.pow(self.support_points @ self.support_points.T, self.zeta)
 
 
@@ -48,16 +80,10 @@ class FullGapModel(torch.nn.Module):
     def forward(self, power_spectrum, all_species, structures_slices):
         assert all_species.shape[0] == power_spectrum.shape[0]
 
-        n_structures = len(structures_slices)
-        k = torch.zeros(
-            (n_structures, len(self.training_slices)),
-            device=power_spectrum.device,
+        k_atom_atom = self.kernel(power_spectrum)
+        k = SumStructureKernel.apply(
+            k_atom_atom, structures_slices, self.training_slices
         )
-
-        for i, structure_i in enumerate(structures_slices):
-            k_atom_atom = self.kernel(power_spectrum[structure_i])
-            for j, structure_j in enumerate(self.training_slices):
-                k[i, j] = k_atom_atom[:, structure_j].sum()
 
         return k @ self.weights.T
 
@@ -71,35 +97,23 @@ def train_full_gap_model(
     lambdas=[1e-12, 1e-12],
     optimizable_weights=False,
 ):
-    power_spectrum = power_spectrum.detach()
     normalized_power_spectrum = power_spectrum / torch.linalg.norm(
         power_spectrum, dim=1, keepdim=True
     )
     kernel = CosineKernel(normalized_power_spectrum, zeta=zeta)
 
-    n_structures = len(structures_slices)
-    K_NN = torch.zeros(
-        (n_structures, n_structures),
-        device=power_spectrum.device,
-    )
-    for i, structure_i in enumerate(structures_slices):
-        k_atom_atom = kernel(power_spectrum[structure_i])
-
-        for j, structure_j in enumerate(structures_slices):
-            K_NN[i, j] = k_atom_atom[:, structure_j].sum()
+    k_atom_atom = kernel(power_spectrum)
+    K_NN = SumStructureKernel.apply(k_atom_atom, structures_slices, structures_slices)
 
     energies = energies.detach().clone().reshape((-1, 1))
     delta = torch.std(energies)
-
-    old_k = K_NN.clone()
 
     n_atoms_per_frame = torch.tensor([s.stop - s.start for s in structures_slices])
     # regularize the kernel
     K_NN[np.diag_indices_from(K_NN)] += (
         lambdas[0] / delta * torch.sqrt(n_atoms_per_frame)
     )
-
-    weights = torch.linalg.lstsq(K_NN, energies, rcond=None)[0]
+    weights = torch.linalg.solve(K_NN, energies)
 
     return FullGapModel(kernel, structures_slices, weights.T, optimizable_weights)
 
@@ -147,7 +161,6 @@ def train_sparse_gap_model(
     jitter=1e-13,
     optimizable_weights=False,
 ):
-    power_spectrum = power_spectrum.detach()
     support_points = select_support_points(power_spectrum, all_species, n_support)
 
     kernels = {}
@@ -183,15 +196,13 @@ def train_sparse_gap_model(
     K = K_MM + K_NM.T @ K_NM
     Y = K_NM.T @ Y
 
-    weights = torch.linalg.lstsq(K, Y, rcond=None)[0]
+    weights = torch.linalg.solve(K, Y)
 
     weights_per_species = {}
     start = 0
     for species, kernel in kernels.items():
         stop = start + kernel.support_points.shape[0]
-        weights_per_species[species] = (
-            weights[start:stop, :].detach().T.clone().contiguous()
-        )
+        weights_per_species[species] = weights[start:stop, :].T
         start = stop
 
     return SparseGapModel(kernels, weights_per_species, optimizable_weights)
