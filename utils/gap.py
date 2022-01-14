@@ -108,7 +108,10 @@ def train_full_gap_model(
     energies = energies.detach().clone().reshape((-1, 1))
     delta = torch.std(energies)
 
-    n_atoms_per_frame = torch.tensor([s.stop - s.start for s in structures_slices])
+    n_atoms_per_frame = torch.tensor(
+        [s.stop - s.start for s in structures_slices],
+        device=power_spectrum.device,
+    )
     # regularize the kernel
     K_NN[np.diag_indices_from(K_NN)] += (
         lambdas[0] / delta * torch.sqrt(n_atoms_per_frame)
