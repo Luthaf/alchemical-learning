@@ -53,12 +53,10 @@ class PowerSpectrum(torch.nn.Module):
             stop = (l + 1) * n_species_radial * n_species_radial
 
             power_spectrum = torch.einsum(
-                "i m q, i m r -> i m q r", spherical_expansion, spherical_expansion
-            )
-            power_spectrum = power_spectrum.reshape(
-                spherical_expansion.shape[0], spherical_expansion.shape[1], -1
-            )
-            power_spectrum = power_spectrum.sum(dim=1) / math.sqrt(2 * l + 1)
+                "i m q, i m r -> i q r", spherical_expansion, spherical_expansion
+            ) / math.sqrt(2 * l + 1)
+
+            power_spectrum = power_spectrum.reshape(spherical_expansion.shape[0], -1)
 
             output[:, start:stop] = power_spectrum
 
