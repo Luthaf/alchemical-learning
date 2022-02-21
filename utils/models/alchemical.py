@@ -3,15 +3,18 @@ import torch
 from ..soap import PowerSpectrum
 from ..alchemical import AlchemicalCombine
 
-from ..gap import FullGap, SparseGap
+from ..gap import FullGap, SparseGap, RidgeRegression
 
 
 class BaseMixedSpeciesGapModel_(torch.nn.Module):
-    def __init__(self, species, n_pseudo_species, optimizable_weights):
+    def __init__(
+        self, species, n_pseudo_species, uses_support_points, optimizable_weights
+    ):
         super().__init__()
         self.power_spectrum = PowerSpectrum()
         self.alchemical = AlchemicalCombine(species, n_pseudo_species)
 
+        self.uses_support_points = uses_support_points
         self.optimizable_weights = optimizable_weights
         self.model = None
 
@@ -47,9 +50,35 @@ class BaseMixedSpeciesGapModel_(torch.nn.Module):
         return super().parameters()
 
 
+class MixedSpeciesLinearModel(BaseMixedSpeciesGapModel_):
+    def __init__(self, species, n_pseudo_species, lambdas, optimizable_weights=False):
+        super().__init__(
+            species,
+            n_pseudo_species,
+            uses_support_points=False,
+            optimizable_weights=optimizable_weights,
+        )
+
+        self.lambdas = lambdas
+
+    def _fit_model(self, power_spectrum, all_species, structures_slices, energies):
+        return RidgeRegression(
+            power_spectrum=power_spectrum,
+            structures_slices=structures_slices,
+            energies=energies,
+            lambdas=self.lambdas,
+            optimizable_weights=self.optimizable_weights,
+        )
+
+
 class MixedSpeciesFullGapModel(BaseMixedSpeciesGapModel_):
     def __init__(self, species, n_pseudo_species, zeta, lambdas, optimizable_weights):
-        super().__init__(species, n_pseudo_species, optimizable_weights)
+        super().__init__(
+            species,
+            n_pseudo_species,
+            uses_support_points=True,
+            optimizable_weights=optimizable_weights,
+        )
 
         self.zeta = zeta
         self.lambdas = lambdas
@@ -76,7 +105,12 @@ class MixedSpeciesSparseGapModel(BaseMixedSpeciesGapModel_):
         optimizable_weights,
         jitter=1e-12,
     ):
-        super().__init__(species, n_pseudo_species, optimizable_weights)
+        super().__init__(
+            species,
+            n_pseudo_species,
+            uses_support_points=True,
+            optimizable_weights=optimizable_weights,
+        )
 
         self.zeta = zeta
         self.lambdas = lambdas

@@ -1,14 +1,15 @@
 import torch
 
 from ..soap import PowerSpectrum
-from ..gap import FullGap, SparseGap, SparseGapPerSpecies
+from ..gap import FullGap, SparseGap, SparseGapPerSpecies, RidgeRegression
 
 
 class BaseGapModel_(torch.nn.Module):
-    def __init__(self, optimizable_weights):
+    def __init__(self, uses_support_points, optimizable_weights):
         super().__init__()
         self.power_spectrum = PowerSpectrum()
 
+        self.uses_support_points = uses_support_points
         self.optimizable_weights = optimizable_weights
         self.model = None
 
@@ -35,9 +36,31 @@ class BaseGapModel_(torch.nn.Module):
         return super().parameters()
 
 
+class LinearModel(BaseGapModel_):
+    def __init__(self, lambdas, optimizable_weights=False):
+        super().__init__(
+            uses_support_points=False,
+            optimizable_weights=optimizable_weights,
+        )
+
+        self.lambdas = lambdas
+
+    def _fit_model(self, power_spectrum, all_species, structures_slices, energies):
+        return RidgeRegression(
+            power_spectrum=power_spectrum,
+            structures_slices=structures_slices,
+            energies=energies,
+            lambdas=self.lambdas,
+            optimizable_weights=self.optimizable_weights,
+        )
+
+
 class FullGapModel(BaseGapModel_):
     def __init__(self, zeta, lambdas, optimizable_weights=False):
-        super().__init__(optimizable_weights)
+        super().__init__(
+            uses_support_points=True,
+            optimizable_weights=optimizable_weights,
+        )
 
         self.zeta = zeta
         self.lambdas = lambdas
@@ -57,7 +80,11 @@ class SparseGapModel(BaseGapModel_):
     def __init__(
         self, n_support, zeta, lambdas, jitter=1e-12, optimizable_weights=False
     ):
-        super().__init__(optimizable_weights)
+        super().__init__(
+            uses_support_points=True,
+            optimizable_weights=optimizable_weights,
+        )
+
         self.power_spectrum = PowerSpectrum()
 
         self.n_support = n_support
@@ -85,7 +112,11 @@ class PerSpeciesSparseGapModel(BaseGapModel_):
     def __init__(
         self, n_support, zeta, lambdas, jitter=1e-12, optimizable_weights=False
     ):
-        super().__init__(optimizable_weights)
+        super().__init__(
+            uses_support_points=True,
+            optimizable_weights=optimizable_weights,
+        )
+
         self.power_spectrum = PowerSpectrum()
 
         self.n_support = n_support
