@@ -19,6 +19,7 @@ class SparseGap(torch.nn.Module):
         lambdas=[1e-12, 1e-12],
         jitter=1e-13,
         optimizable_weights=False,
+        detach_support_points=False,
     ):
         super().__init__()
 
@@ -32,7 +33,11 @@ class SparseGap(torch.nn.Module):
         )
 
         support_points = normalized_power_spectrum[self.selected_points]
-        self.kernel = CosineKernel(support_points, zeta=zeta)
+        self.kernel = CosineKernel(
+            support_points,
+            zeta=zeta,
+            detach_support_points=detach_support_points,
+        )
 
         K_MM = self.kernel.compute_KMM()
 

@@ -44,27 +44,27 @@ class RidgeRegression(torch.nn.Module):
         energies: torch.Tensor,
         lambdas=[1e-12, 1e-12],
         optimizable_weights=False,
+        random_initial_weights=False,
     ):
         super().__init__()
 
-        structure_power_spectrum = SumStructures.apply(
-            power_spectrum, structures_slices
-        )
-
-        XT_X = structure_power_spectrum.T @ structure_power_spectrum
-
-        energies = energies.detach().clone().reshape((-1, 1))
-        delta = torch.std(energies)
-
-        # regularize
-        XT_X[np.diag_indices_from(XT_X)] += lambdas[0] / delta
-
-        weights = torch.linalg.solve(XT_X, structure_power_spectrum.T @ energies)
+        if random_initial_weights:
+            weights = torch.rand(
+                (1, power_spectrum.shape[1]),
+                device=power_spectrum.device,
+            )
+        else:
+            weights = _fit_linear_model(
+                power_spectrum,
+                structures_slices,
+                energies,
+                lambdas,
+            )
 
         if optimizable_weights:
-            self.weights = torch.nn.Parameter(weights.T.detach())
+            self.weights = torch.nn.Parameter(weights.detach())
         else:
-            self.weights = weights.T
+            self.weights = weights
 
     def update_support_points(self, power_spectrum, all_species, select_again=False):
         return
@@ -73,3 +73,19 @@ class RidgeRegression(torch.nn.Module):
         X = SumStructures.apply(power_spectrum, structures_slices)
 
         return X @ self.weights.T
+
+
+def _fit_linear_model(power_spectrum, structures_slices, energies, lambdas):
+    structure_power_spectrum = SumStructures.apply(power_spectrum, structures_slices)
+
+    XT_X = structure_power_spectrum.T @ structure_power_spectrum
+
+    energies = energies.detach().clone().reshape((-1, 1))
+    delta = torch.std(energies)
+
+    # regularize
+    XT_X[np.diag_indices_from(XT_X)] += lambdas[0] / delta
+
+    weights = torch.linalg.solve(XT_X, structure_power_spectrum.T @ energies)
+
+    return weights.T

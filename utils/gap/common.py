@@ -39,14 +39,19 @@ class SumStructureKernel(torch.autograd.Function):
 
 
 class CosineKernel(torch.nn.Module):
-    def __init__(self, support_points, zeta=2):
+    def __init__(self, support_points, detach_support_points, zeta=2):
         super().__init__()
-        self.support_points = support_points
+
         assert torch.allclose(
             torch.linalg.norm(support_points, dim=1),
             torch.tensor(1.0, device=support_points.device),
         )
 
+        self.detach_support_points = detach_support_points
+        if self.detach_support_points:
+            support_points = support_points.detach()
+
+        self.register_buffer("support_points", support_points)
         self.zeta = zeta
 
     def forward(self, power_spectrum: torch.Tensor):
@@ -59,8 +64,8 @@ class CosineKernel(torch.nn.Module):
         # suport points are already normalized
         return torch.pow(self.support_points @ self.support_points.T, self.zeta)
 
-    def to(self, device=None, dtype=None, non_blocking=False):
-        self.support_points.to(device=device, dtype=dtype, non_blocking=non_blocking)
-
     def update_support_points(self, support_points):
-        self.support_points = support_points
+        if self.detach_support_points:
+            support_points = support_points.detach()
+
+        self.support_points[:] = support_points

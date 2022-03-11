@@ -5,12 +5,20 @@ from ..gap import FullGap, SparseGap, SparseGapPerSpecies, RidgeRegression
 
 
 class BaseGapModel_(torch.nn.Module):
-    def __init__(self, uses_support_points, optimizable_weights):
+    def __init__(
+        self,
+        uses_support_points,
+        optimizable_weights,
+        random_initial_weights,
+        detach_support_points,
+    ):
         super().__init__()
         self.power_spectrum = PowerSpectrum()
 
         self.uses_support_points = uses_support_points
         self.optimizable_weights = optimizable_weights
+        self.random_initial_weights = random_initial_weights
+        self.detach_support_points = detach_support_points
         self.model = None
 
     def _fit_model(self, power_spectrum, all_species, structures_slices, energies):
@@ -37,10 +45,16 @@ class BaseGapModel_(torch.nn.Module):
 
 
 class LinearModel(BaseGapModel_):
-    def __init__(self, lambdas, optimizable_weights=False):
+    def __init__(
+        self,
+        lambdas,
+        optimizable_weights=False,
+        random_initial_weights=False,
+    ):
         super().__init__(
             uses_support_points=False,
             optimizable_weights=optimizable_weights,
+            random_initial_weights=random_initial_weights,
         )
 
         self.lambdas = lambdas
@@ -52,14 +66,24 @@ class LinearModel(BaseGapModel_):
             energies=energies,
             lambdas=self.lambdas,
             optimizable_weights=self.optimizable_weights,
+            random_initial_weights=self.random_initial_weights,
         )
 
 
 class FullGapModel(BaseGapModel_):
-    def __init__(self, zeta, lambdas, optimizable_weights=False):
+    def __init__(
+        self,
+        zeta,
+        lambdas,
+        optimizable_weights,
+        random_initial_weights,
+        detach_support_points,
+    ):
         super().__init__(
             uses_support_points=True,
             optimizable_weights=optimizable_weights,
+            random_initial_weights=random_initial_weights,
+            detach_support_points=detach_support_points,
         )
 
         self.zeta = zeta
@@ -73,16 +97,27 @@ class FullGapModel(BaseGapModel_):
             zeta=self.zeta,
             lambdas=self.lambdas,
             optimizable_weights=self.optimizable_weights,
+            random_initial_weights=self.random_initial_weights,
+            detach_support_points=self.detach_support_points,
         )
 
 
 class SparseGapModel(BaseGapModel_):
     def __init__(
-        self, n_support, zeta, lambdas, jitter=1e-12, optimizable_weights=False
+        self,
+        n_support,
+        zeta,
+        lambdas,
+        optimizable_weights,
+        random_initial_weights,
+        detach_support_points,
+        jitter=1e-12,
     ):
         super().__init__(
             uses_support_points=True,
             optimizable_weights=optimizable_weights,
+            random_initial_weights=random_initial_weights,
+            detach_support_points=detach_support_points,
         )
 
         self.power_spectrum = PowerSpectrum()
@@ -105,6 +140,8 @@ class SparseGapModel(BaseGapModel_):
             lambdas=self.lambdas,
             jitter=self.jitter,
             optimizable_weights=self.optimizable_weights,
+            random_initial_weights=self.random_initial_weights,
+            detach_support_points=self.detach_support_points,
         )
 
 
