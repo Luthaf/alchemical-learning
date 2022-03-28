@@ -39,7 +39,9 @@ class FullGap(torch.nn.Module):
             )
         else:
             k_atom_atom = self.kernel(power_spectrum)
-            weights = _fit_full_kernel(k_atom_atom)
+            weights = _fit_full_kernel(
+                k_atom_atom, structures_slices, energies, lambdas
+            )
 
         if optimizable_weights:
             self.weights = torch.nn.Parameter(weights.detach())
