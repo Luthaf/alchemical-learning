@@ -66,7 +66,13 @@ class RidgeRegression(torch.nn.Module):
         else:
             self.weights = weights
 
-    def update_support_points(self, power_spectrum, all_species, select_again=False):
+    def update_support_points(
+        self,
+        power_spectrum,
+        all_species,
+        structures_slices,
+        select_again=False,
+    ):
         return
 
     def forward(self, power_spectrum, all_species, structures_slices):

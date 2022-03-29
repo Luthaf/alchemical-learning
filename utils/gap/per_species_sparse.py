@@ -105,7 +105,13 @@ class SparseGapPerSpecies(torch.nn.Module):
 
         return energy
 
-    def update_support_points(self, power_spectrum, all_species, select_again=False):
+    def update_support_points(
+        self,
+        power_spectrum,
+        all_species,
+        structures_slices,
+        select_again=False,
+    ):
         normalized_power_spectrum = power_spectrum / torch.linalg.norm(
             power_spectrum, dim=1, keepdim=True
         )

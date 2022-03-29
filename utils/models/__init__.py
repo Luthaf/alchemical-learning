@@ -8,5 +8,6 @@ from .standard import (  # noqa
 from .alchemical import (  # noqa
     MixedSpeciesLinearModel,
     MixedSpeciesFullGapModel,
+    MixedSpeciesFullLinearGapModel,
     MixedSpeciesSparseGapModel,
 )
