@@ -55,6 +55,7 @@ class LinearModel(BaseGapModel_):
             uses_support_points=False,
             optimizable_weights=optimizable_weights,
             random_initial_weights=random_initial_weights,
+            detach_support_points=False,
         )
 
         self.lambdas = lambdas

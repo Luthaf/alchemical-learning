@@ -144,6 +144,8 @@ def _fit_full_kernel(K_NN, structures_slices, energies, lambdas):
     energies = energies.detach().clone().reshape((-1, 1))
     delta = torch.std(energies)
 
+    assert torch.allclose(K_NN.T, K_NN)
+
     n_atoms_per_frame = torch.tensor(
         [s.stop - s.start for s in structures_slices],
         device=K_NN.device,
