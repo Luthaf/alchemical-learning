@@ -1,5 +1,6 @@
 virtualenv/
 
 *.pdf
+*.dat
 
 __pycache__/

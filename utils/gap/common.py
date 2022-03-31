@@ -68,4 +68,6 @@ class CosineKernel(torch.nn.Module):
         if self.detach_support_points:
             support_points = support_points.detach()
 
-        self.support_points[:] = support_points
+        # remove leftover bits of memory stored in `self.support_points.grad_fn`
+        del self.support_points
+        self.register_buffer("support_points", support_points)
