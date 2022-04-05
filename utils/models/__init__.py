@@ -11,3 +11,7 @@ from .alchemical import (  # noqa
     MixedSpeciesFullLinearGapModel,
     MixedSpeciesSparseGapModel,
 )
+
+from .nchemical import (  # noqa
+    NChemicalLinearModel,
+)

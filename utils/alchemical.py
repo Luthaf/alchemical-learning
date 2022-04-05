@@ -30,26 +30,26 @@ class AlchemicalCombine(torch.nn.Module):
 
         return output
 
-class RadialChemicalCombine(torch.nn.Module):
-    def __init__(self, species, n_pseudo_species):
+class NChemicalCombine(torch.nn.Module):
+    def __init__(self, spherical_expansion: Dict[int, torch.Tensor], n_contracted):
         super().__init__()
-        coupling = _species_coupling_matrix(species)
-        pca = sklearn.decomposition.PCA(n_components=n_pseudo_species)
-        self.combining_matrix = torch.nn.Parameter(
-            torch.tensor(pca.fit_transform(coupling)).contiguous()
-        )
+        coeff_dict = {}
+        for l, se in spherical_expansion.items():
+            # initialize the coefficients with the PCA of a reference feature set
+            pca = sklearn.decomposition.PCA(n_components=n_contracted)
+            xan = se.reshape(se.shape[0]*se.shape[1], -1)
+            pca.fit(xan)            
+            coeff_dict[str(l)] = torch.nn.Parameter(
+                torch.tensor(pca.components_.T).contiguous()
+                )
+        self.combining_coeffs = torch.nn.ParameterDict(coeff_dict)
 
-    def forward(self, spherical_expansion: Dict[int, torch.Tensor]):
-        n_species = self.combining_matrix.shape[0]
-
+    def forward(self, spherical_expansion: Dict[int, torch.Tensor]):        
         output = {}
         for l, se in spherical_expansion.items():
-            se = se.reshape(se.shape[0], se.shape[1], n_species, -1)
+            se = se.reshape(se.shape[0], se.shape[1], -1)
 
-            se = se.swapaxes(2, 3)
-            combined = se @ self.combining_matrix
-            combined = combined.swapaxes(2, 3)
-
+            combined = se @ self.combining_coeffs[str(l)]
             output[l] = combined.reshape(se.shape[0], se.shape[1], -1)
 
         return output
