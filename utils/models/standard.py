@@ -21,16 +21,30 @@ class BaseGapModel_(torch.nn.Module):
         self.detach_support_points = detach_support_points
         self.model = None
 
-    def _fit_model(self, power_spectrum, all_species, structures_slices, energies):
+    def _fit_model(
+        self,
+        power_spectrum,
+        all_species,
+        structures_slices,
+        energies,
+        forces,
+    ):
         raise Exception("this should be implemented in the child class")
 
-    def fit(self, spherical_expansion, all_species, structures_slices, energies):
+    def fit(
+        self,
+        spherical_expansion,
+        all_species,
+        structures_slices,
+        energies,
+        forces=None,
+    ):
         if self.model is not None and self.optimizable_weights:
             raise Exception("You should only call fit once with optimizable weights")
 
         power_spectrum = self.power_spectrum(spherical_expansion)
         self.model = self._fit_model(
-            power_spectrum, all_species, structures_slices, energies
+            power_spectrum, all_species, structures_slices, energies, forces
         )
 
     def forward(self, spherical_expansion, all_species, structures_slices):
@@ -60,7 +74,14 @@ class LinearModel(BaseGapModel_):
 
         self.lambdas = lambdas
 
-    def _fit_model(self, power_spectrum, all_species, structures_slices, energies):
+    def _fit_model(
+        self,
+        power_spectrum,
+        all_species,
+        structures_slices,
+        energies,
+        forces,
+    ):
         return RidgeRegression(
             power_spectrum=power_spectrum,
             structures_slices=structures_slices,
@@ -90,11 +111,19 @@ class FullGapModel(BaseGapModel_):
         self.zeta = zeta
         self.lambdas = lambdas
 
-    def _fit_model(self, power_spectrum, all_species, structures_slices, energies):
+    def _fit_model(
+        self,
+        power_spectrum,
+        all_species,
+        structures_slices,
+        energies,
+        forces,
+    ):
         return FullGap(
             power_spectrum=power_spectrum,
             structures_slices=structures_slices,
             energies=energies,
+            forces=forces,
             zeta=self.zeta,
             lambdas=self.lambdas,
             optimizable_weights=self.optimizable_weights,
@@ -131,11 +160,19 @@ class SparseGapModel(BaseGapModel_):
 
         self.model = None
 
-    def _fit_model(self, power_spectrum, all_species, structures_slices, energies):
+    def _fit_model(
+        self,
+        power_spectrum,
+        all_species,
+        structures_slices,
+        energies,
+        forces,
+    ):
         return SparseGap(
             power_spectrum=power_spectrum,
             structures_slices=structures_slices,
             energies=energies,
+            forces=forces,
             n_support=self.n_support,
             zeta=self.zeta,
             lambdas=self.lambdas,
@@ -165,12 +202,20 @@ class PerSpeciesSparseGapModel(BaseGapModel_):
 
         self.model = None
 
-    def _fit_model(self, power_spectrum, all_species, structures_slices, energies):
+    def _fit_model(
+        self,
+        power_spectrum,
+        all_species,
+        structures_slices,
+        energies,
+        forces,
+    ):
         return SparseGapPerSpecies(
             power_spectrum=power_spectrum,
             all_species=all_species,
             structures_slices=structures_slices,
             energies=energies,
+            forces=forces,
             n_support=self.n_support,
             zeta=self.zeta,
             lambdas=self.lambdas,

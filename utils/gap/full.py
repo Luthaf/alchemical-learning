@@ -1,7 +1,7 @@
 import numpy as np
 
 import torch
-from typing import List
+from typing import List, Optional
 
 from .common import CosineKernel, SumStructureKernel
 from .linear import SumStructures
@@ -12,14 +12,18 @@ class FullGap(torch.nn.Module):
         self,
         power_spectrum: torch.Tensor,
         structures_slices: List[slice],
-        energies: torch.Tensor,
         zeta: int,
+        energies: torch.Tensor,
+        forces: Optional[torch.Tensor] = None,
         lambdas=[1e-12, 1e-12],
         optimizable_weights=False,
         random_initial_weights=False,
         detach_support_points=False,
     ):
         super().__init__()
+
+        if forces is not None:
+            raise ValueError("fitting with forces is not implemented ")
 
         normalized_power_spectrum = power_spectrum / torch.linalg.norm(
             power_spectrum, dim=1, keepdim=True

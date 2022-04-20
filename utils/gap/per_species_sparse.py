@@ -1,7 +1,7 @@
 import numpy as np
 
 import torch
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from skcosmo.sample_selection import FPS
 
@@ -14,14 +14,18 @@ class SparseGapPerSpecies(torch.nn.Module):
         power_spectrum: torch.Tensor,
         all_species: torch.Tensor,
         structures_slices: List[slice],
-        energies: torch.Tensor,
         n_support: Dict[int, int],
-        zeta=2,
+        zeta: int,
+        energies: torch.Tensor,
+        forces: Optional[torch.Tensor] = None,
         lambdas=[1e-12, 1e-12],
         jitter=1e-13,
         optimizable_weights=False,
     ):
         super().__init__()
+
+        if forces is not None:
+            raise ValueError("fitting with forces is not implemented")
 
         normalized_power_spectrum = power_spectrum / torch.linalg.norm(
             power_spectrum, dim=1, keepdim=True

@@ -3,7 +3,7 @@ import torch
 from ..soap import PowerSpectrum
 from ..alchemical import NChemicalCombine
 
-from ..gap import FullGap, SparseGap, RidgeRegression
+from ..gap import RidgeRegression
 
 
 class BaseNChemicalGapModel_(torch.nn.Module):
@@ -28,7 +28,14 @@ class BaseNChemicalGapModel_(torch.nn.Module):
 
         self.model = None
 
-    def _fit_model(self, power_spectrum, all_species, structures_slices, energies):
+    def _fit_model(
+        self,
+        power_spectrum,
+        all_species,
+        structures_slices,
+        energies,
+        forces,
+    ):
         raise Exception("this should be implemented in the child class")
 
     def update_support_points(
@@ -38,14 +45,21 @@ class BaseNChemicalGapModel_(torch.nn.Module):
         power_spectrum = self.power_spectrum(combined)
         self.model.update_support_points(power_spectrum, all_species, select_again)
 
-    def fit(self, spherical_expansion, all_species, structures_slices, energies):
+    def fit(
+        self,
+        spherical_expansion,
+        all_species,
+        structures_slices,
+        energies,
+        forces=None,
+    ):
         if self.model is not None and self.optimizable_weights:
             raise Exception("You should only call fit once with optimizable weights")
 
         combined = self.nchemical(spherical_expansion)
         power_spectrum = self.power_spectrum(combined)
         self.model = self._fit_model(
-            power_spectrum, all_species, structures_slices, energies
+            power_spectrum, all_species, structures_slices, energies, forces
         )
 
     def forward(self, spherical_expansion, all_species, structures_slices):
@@ -80,11 +94,19 @@ class NChemicalLinearModel(BaseNChemicalGapModel_):
 
         self.lambdas = lambdas
 
-    def _fit_model(self, power_spectrum, all_species, structures_slices, energies):
+    def _fit_model(
+        self,
+        power_spectrum,
+        all_species,
+        structures_slices,
+        energies,
+        forces,
+    ):
         return RidgeRegression(
             power_spectrum=power_spectrum,
             structures_slices=structures_slices,
             energies=energies,
+            forces=forces,
             lambdas=self.lambdas,
             optimizable_weights=self.optimizable_weights,
             random_initial_weights=self.random_initial_weights,

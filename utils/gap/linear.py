@@ -1,7 +1,7 @@
 import numpy as np
 
 import torch
-from typing import List
+from typing import List, Optional
 
 
 class SumStructures(torch.autograd.Function):
@@ -42,11 +42,15 @@ class RidgeRegression(torch.nn.Module):
         power_spectrum: torch.Tensor,
         structures_slices: List[slice],
         energies: torch.Tensor,
+        forces: Optional[torch.Tensor] = None,
         lambdas=[1e-12, 1e-12],
         optimizable_weights=False,
         random_initial_weights=False,
     ):
         super().__init__()
+
+        if forces is not None:
+            raise ValueError("fitting with forces is not implemented yet")
 
         if random_initial_weights:
             weights = torch.rand(

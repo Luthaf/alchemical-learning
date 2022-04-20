@@ -28,7 +28,14 @@ class BaseMixedSpeciesGapModel_(torch.nn.Module):
 
         self.model = None
 
-    def _fit_model(self, power_spectrum, all_species, structures_slices, energies):
+    def _fit_model(
+        self,
+        power_spectrum,
+        all_species,
+        structures_slices,
+        energies,
+        forces,
+    ):
         raise Exception("this should be implemented in the child class")
 
     def update_support_points(
@@ -47,14 +54,21 @@ class BaseMixedSpeciesGapModel_(torch.nn.Module):
             select_again,
         )
 
-    def fit(self, spherical_expansion, all_species, structures_slices, energies):
+    def fit(
+        self,
+        spherical_expansion,
+        all_species,
+        structures_slices,
+        energies,
+        forces=None,
+    ):
         if self.model is not None and self.optimizable_weights:
             raise Exception("You should only call fit once with optimizable weights")
 
         combined = self.alchemical(spherical_expansion)
         power_spectrum = self.power_spectrum(combined)
         self.model = self._fit_model(
-            power_spectrum, all_species, structures_slices, energies
+            power_spectrum, all_species, structures_slices, energies, forces
         )
 
     def forward(self, spherical_expansion, all_species, structures_slices):
@@ -89,11 +103,14 @@ class MixedSpeciesLinearModel(BaseMixedSpeciesGapModel_):
 
         self.lambdas = lambdas
 
-    def _fit_model(self, power_spectrum, all_species, structures_slices, energies):
+    def _fit_model(
+        self, power_spectrum, all_species, structures_slices, energies, forces
+    ):
         return RidgeRegression(
             power_spectrum=power_spectrum,
             structures_slices=structures_slices,
             energies=energies,
+            forces=forces,
             lambdas=self.lambdas,
             optimizable_weights=self.optimizable_weights,
             random_initial_weights=self.random_initial_weights,
@@ -123,11 +140,19 @@ class MixedSpeciesFullGapModel(BaseMixedSpeciesGapModel_):
         self.zeta = zeta
         self.lambdas = lambdas
 
-    def _fit_model(self, power_spectrum, all_species, structures_slices, energies):
+    def _fit_model(
+        self,
+        power_spectrum,
+        all_species,
+        structures_slices,
+        energies,
+        forces,
+    ):
         return FullGap(
             power_spectrum=power_spectrum,
             structures_slices=structures_slices,
             energies=energies,
+            forces=forces,
             zeta=self.zeta,
             lambdas=self.lambdas,
             optimizable_weights=self.optimizable_weights,
@@ -157,11 +182,19 @@ class MixedSpeciesFullLinearGapModel(BaseMixedSpeciesGapModel_):
 
         self.lambdas = lambdas
 
-    def _fit_model(self, power_spectrum, all_species, structures_slices, energies):
+    def _fit_model(
+        self,
+        power_spectrum,
+        all_species,
+        structures_slices,
+        energies,
+        forces,
+    ):
         return FullLinearGap(
             power_spectrum=power_spectrum,
             structures_slices=structures_slices,
             energies=energies,
+            forces=forces,
             lambdas=self.lambdas,
             optimizable_weights=self.optimizable_weights,
             detach_support_points=self.detach_support_points,
@@ -196,11 +229,19 @@ class MixedSpeciesSparseGapModel(BaseMixedSpeciesGapModel_):
         self.n_support = n_support
         self.jitter = jitter
 
-    def _fit_model(self, power_spectrum, all_species, structures_slices, energies):
+    def _fit_model(
+        self,
+        power_spectrum,
+        all_species,
+        structures_slices,
+        energies,
+        forces,
+    ):
         return SparseGap(
             power_spectrum=power_spectrum,
             structures_slices=structures_slices,
             energies=energies,
+            forces=forces,
             n_support=self.n_support,
             zeta=self.zeta,
             lambdas=self.lambdas,
