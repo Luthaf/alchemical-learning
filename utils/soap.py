@@ -1,140 +1,112 @@
-from typing import Dict
+import numpy as np
 import torch
 import math
-import copy
 
-import ase
-
-from rascal.representations import SphericalExpansion
-
-
-def compute_spherical_expansion_librascal(frames, hypers, gradients=False):
-    hypers = copy.deepcopy(hypers)
-    hypers["compute_gradients"] = gradients
-    calculator = SphericalExpansion(**hypers)
-
-    se = []
-    for frame in frames:
-        assert isinstance(frame, TorchFrame)
-        se.append(
-            SphericalExpansionAutograd.apply(
-                calculator,
-                frame.positions,
-                frame.cell,
-                frame.species,
-            )
-        )
-    se = torch.vstack(se)
-
-    max_radial = hypers["max_radial"]
-    max_angular = hypers["max_angular"]
-    n_species = len(hypers["global_species"])
-
-    # Transform from [i_center, alpha, n, lm] to [i_center, lm, alpha, n]
-    se = se.reshape(se.shape[0], n_species * max_radial, -1)
-    se = se.swapaxes(1, 2)
-
-    spherical_expansion = {}
-    start = 0
-    for l in range(max_angular + 1):
-        stop = start + 2 * l + 1
-        spherical_expansion[l] = se[:, start:stop, :]
-        start = stop
-
-    structures_slices = []
-    n_atoms_before = 0
-    for frame in frames:
-        structures_slices.append(slice(n_atoms_before, n_atoms_before + len(frame)))
-        n_atoms_before += len(frame)
-
-    return spherical_expansion, structures_slices
+from equistore import Labels, TensorBlock, TensorMap
 
 
 class PowerSpectrum(torch.nn.Module):
     def __init__(self):
         super().__init__()
 
-    def forward(self, spherical_expansions: Dict[int, torch.Tensor]):
-        n_environments = spherical_expansions[0].shape[0]
-        n_angular = len(spherical_expansions)
-        n_species_radial = spherical_expansions[0].shape[2]
-        feature_size = n_angular * n_species_radial * n_species_radial
+    def forward(self, spherical_expansion: TensorMap) -> TensorMap:
+        # Make sure that the expansion coefficients have the correct set of keys
+        # associated with 1-center expansion coefficients.
+        assert spherical_expansion.keys.names == ("spherical_harmonics_l",)
 
-        output = torch.zeros(
-            (n_environments, feature_size), device=spherical_expansions[0].device
-        )
-        for l, spherical_expansion in spherical_expansions.items():
-            start = l * n_species_radial * n_species_radial
-            stop = (l + 1) * n_species_radial * n_species_radial
+        blocks = []
+        for (l,), spx_1 in spherical_expansion:
+            spx_2 = spherical_expansion.block(spherical_harmonics_l=l)
 
-            power_spectrum = torch.einsum(
-                "i m q, i m r -> i q r", spherical_expansion, spherical_expansion
-            ) / math.sqrt(2 * l + 1)
+            # with the same central species, we should have the same samples
+            assert np.all(spx_1.samples == spx_2.samples)
 
-            power_spectrum = power_spectrum.reshape(spherical_expansion.shape[0], -1)
+            factor = 1.0 / math.sqrt(2 * l + 1)
+            properties = Labels(
+                names=[f"{name}_1" for name in spx_1.properties.names]
+                + [f"{name}_2" for name in spx_2.properties.names],
+                values=np.array(
+                    [
+                        properties_1.tolist() + properties_2.tolist()
+                        for properties_1 in spx_1.properties
+                        for properties_2 in spx_2.properties
+                    ],
+                    dtype=np.int32,
+                ),
+            )
 
-            output[:, start:stop] = power_spectrum
+            # Compute the invariants by summation and store the results
+            data = factor * torch.einsum("ima, imb -> iab", spx_1.values, spx_2.values)
 
-        return output
+            block = TensorBlock(
+                values=data.reshape(data.shape[0], -1),
+                samples=spx_1.samples,
+                components=[],
+                properties=properties,
+            )
 
+            if spx_1.has_gradient("positions"):
+                raise ValueError("unchecked with new implementation")
+                # n_properties = block.values.shape[1]
+                # gradient_1 = spx_1.gradient("positions")
+                # gradient_2 = spx_2.gradient("positions")
 
-class SphericalExpansionAutograd(torch.autograd.Function):
-    @staticmethod
-    def forward(ctx, calculator, positions, cell, numbers):
-        assert isinstance(positions, torch.Tensor)
-        assert isinstance(cell, torch.Tensor)
-        assert isinstance(numbers, torch.Tensor)
+                # if len(gradient_1.samples) == 0 or len(gradient_2.samples) == 0:
+                #     continue
 
-        frame = ase.Atoms(
-            numbers=numbers.numpy(), cell=cell.numpy(), positions=positions.numpy()
-        )
-        manager = calculator.transform(frame)
-        descriptor = manager.get_features(calculator)
+                # gradients_samples = np.unique(
+                #     np.concatenate([gradient_1.samples, gradient_2.samples])
+                # )
+                # gradients_samples = gradients_samples.view(np.int32).reshape(-1, 3)
 
-        grad_descriptor = manager.get_features_gradient(calculator)
-        grad_info = manager.get_gradients_info()
-        ctx.save_for_backward(
-            torch.tensor(grad_descriptor),
-            torch.tensor(grad_info),
-        )
+                # gradients_samples = Labels(
+                #     names=gradient_1.samples.names, values=gradients_samples
+                # )
 
-        return torch.tensor(descriptor)
+                # gradients_sample_mapping = {
+                #     tuple(sample): i for i, sample in enumerate(gradients_samples)
+                # }
 
-    @staticmethod
-    def backward(ctx, grad_output):
-        grad_spherical_expansion, grad_info = ctx.saved_tensors
+                # gradient_data = ops.zeros_like(
+                #     gradient_1.data, (gradients_samples.shape[0], 3, n_properties)
+                # )
 
-        grad_calculator = grad_positions = grad_cell = grad_numbers = None
+                # gradient_data_1 = factor * ops.einsum(
+                #     "ixma, imb -> ixab",
+                #     gradient_1.data,
+                #     spx_2.values[gradient_1.samples["sample"], :, :],
+                # ).reshape(gradient_1.samples.shape[0], 3, -1)
 
-        if ctx.needs_input_grad[0]:
-            raise ValueError("can not compute gradients w.r.t. calculator")
-        if ctx.needs_input_grad[1]:
-            if grad_spherical_expansion.shape[1] == 0:
-                raise ValueError(
-                    "missing gradients, please set `compute_gradients` to True"
-                )
+                # for sample, row in zip(gradient_1.samples, gradient_data_1):
+                #     new_row = gradients_sample_mapping[tuple(sample)]
+                #     gradient_data[new_row, :, :] += row
 
-            grad_positions = torch.zeros((grad_output.shape[0], 3))
-            for sample, (_, center_i, neighbor_i, *_) in enumerate(grad_info):
-                for spatial_i in range(3):
-                    sample_i = 3 * sample + spatial_i
-                    grad_positions[neighbor_i, spatial_i] += torch.dot(
-                        grad_output[center_i, :], grad_spherical_expansion[sample_i, :]
-                    )
+                # gradient_data_2 = factor * ops.einsum(
+                #     "ima, ixmb -> ixab",
+                #     spx_1.values[gradient_2.samples["sample"], :, :],
+                #     gradient_2.data,
+                # ).reshape(gradient_2.samples.shape[0], 3, -1)
 
-        if ctx.needs_input_grad[2]:
-            raise ValueError("can not compute gradients w.r.t. cell")
-        if ctx.needs_input_grad[2]:
-            raise ValueError("can not compute gradients w.r.t. atomic numbers")
+                # for sample, row in zip(gradient_2.samples, gradient_data_2):
+                #     new_row = gradients_sample_mapping[tuple(sample)]
+                #     gradient_data[new_row, :, :] += row
 
-        return grad_calculator, grad_positions, grad_cell, grad_numbers
+                # assert gradient_1.components[0].names == ("gradient_direction",)
+                # block.add_gradient(
+                #     "positions",
+                #     gradient_data,
+                #     gradients_samples,
+                #     [gradient_1.components[0]],
+                # )
 
+            blocks.append(block)
 
-class TorchFrame:
-    def __init__(self, frame: ase.Atoms, requires_grad: bool):
-        self.positions = torch.tensor(frame.positions, requires_grad=requires_grad)
-        self.species = torch.tensor(frame.numbers)
-        self.cell = torch.tensor(frame.cell[:])
+        descriptor = TensorMap(spherical_expansion.keys, blocks)
 
-    def __len__(self):
-        return self.species.shape[0]
+        # t = descriptor.block(0).values
+        # if t.requires_grad:
+        #     t.register_hook(
+        #         lambda g: print("power_spectrum before backward")
+        #     )
+        descriptor.keys_to_properties("spherical_harmonics_l", sort_samples=False)
+        return descriptor
