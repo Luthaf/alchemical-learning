@@ -2,6 +2,7 @@ numpy
 torch
 
 ase
-rascal @ https://github.com/cosmo-epfl/librascal/archive/ac8fecf944faa0c4b2bf0bd5b11b0236655806b7.zip
+rascaline @ https://github.com/Luthaf/rascaline/archive/6497955a1cdd1d2a2e5f5aa69eb586684389d5f0.zip
+equistore @ https://github.com/lab-cosmo/equistore/archive/f2c1db69d1fbfdcc7b4c8952809ba60aa381d309.zip
 scikit-learn
 skcosmo

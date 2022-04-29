@@ -5,64 +5,61 @@ from equistore import TensorBlock, TensorMap, Labels
 from .rascaline import RascalineSphericalExpansion
 
 
-class AtomisticDataset(torch.utils.data.Dataset):
-    def __init__(self, frames, hypers, energies, forces=None):
-        calculator = RascalineSphericalExpansion(hypers)
-        spherical_expansions = calculator.compute(frames)
+def _move_to_torch(tensor_map, structure_i):
+    blocks = []
+    for _, block in tensor_map:
+        assert block.samples.names == ("structure", "center", "center_species")
+        samples = block.samples.view(dtype=np.int32).reshape(-1, 3).copy()
+        samples[:, 0] = structure_i
+        samples = Labels(block.samples.names, samples)
 
-        spherical_expansions.keys_to_samples("center_species")
-        spherical_expansions.keys_to_properties("neighbor_species")
+        new_block = TensorBlock(
+            values=torch.tensor(block.values),
+            samples=samples,
+            components=block.components,
+            properties=block.properties,
+        )
+
+        for parameter in block.gradients_list():
+            gradient = block.gradient(parameter)
+
+            assert gradient.samples.names == ("sample", "structure", "atom")
+
+            gradient_samples = (
+                gradient.samples.view(dtype=np.int32).reshape(-1, 3).copy()
+            )
+            gradient_samples[:, 1] = structure_i
+            gradient_samples = Labels(gradient.samples.names, gradient_samples)
+
+            new_block.add_gradient(
+                parameter=parameter,
+                data=torch.tensor(gradient.data),
+                samples=gradient_samples,
+                components=gradient.components,
+            )
+
+        blocks.append(new_block)
+
+    return TensorMap(tensor_map.keys, blocks)
+
+
+class AtomisticDataset(torch.utils.data.Dataset):
+    def __init__(self, frames, all_species, hypers, energies, forces=None):
+        all_species = Labels(
+            names=["neighbor_species"],
+            values=np.array(all_species, dtype=np.int32).reshape(-1, 1),
+        )
+
+        calculator = RascalineSphericalExpansion(hypers)
 
         self.spherical_expansions = []
-        for structure_i in range(len(frames)):
-            blocks = []
-            for _, block in spherical_expansions:
-                mask = block.samples["structure"] == structure_i
-
-                new_block = TensorBlock(
-                    values=torch.tensor(block.values[mask].copy()),
-                    samples=block.samples[mask],
-                    components=block.components,
-                    properties=block.properties,
-                )
-
-                if block.has_gradient("positions"):
-                    gradient = block.gradient("positions")
-
-                    new_grad_samples = []
-                    new_grad_data = []
-                    for sample_i, sample in enumerate(np.where(mask)[0]):
-                        grad_mask = gradient.samples["sample"] == sample
-
-                        new_grad_data.append(
-                            torch.tensor(gradient.data[grad_mask].copy())
-                        )
-
-                        # update the sample id in gradients to only span the
-                        # current structure
-                        new_samples = (
-                            gradient.samples[grad_mask]
-                            .copy()
-                            .view(dtype=np.int32)
-                            .reshape(-1, 3)
-                        )
-                        new_samples[:, 0] = sample_i
-                        new_grad_samples.append(new_samples)
-
-                    new_block.add_gradient(
-                        "positions",
-                        data=torch.vstack(new_grad_data),
-                        samples=Labels(
-                            ["sample", "structure", "atom"],
-                            np.vstack(new_grad_samples),
-                        ),
-                        components=gradient.components,
-                    )
-
-                blocks.append(new_block)
+        for frame_i, frame in enumerate(frames):
+            spherical_expansion = calculator.compute(frame)
+            spherical_expansion.keys_to_samples("center_species")
+            spherical_expansion.keys_to_properties(all_species)
 
             self.spherical_expansions.append(
-                TensorMap(spherical_expansions.keys, blocks)
+                _move_to_torch(spherical_expansion, frame_i)
             )
 
         self.frames = frames
@@ -129,8 +126,6 @@ def _collate_data(device):
 
                 previous_samples_count += new_samples.shape[0]
 
-            # print(samples)
-            # raise 44
             new_block = TensorBlock(
                 values=torch.vstack(values).to(device),
                 samples=Labels(
@@ -154,10 +149,10 @@ def _collate_data(device):
             blocks.append(new_block)
 
         spherical_expansion = TensorMap(keys, blocks)
-        energies = torch.vstack([d[1] for d in data])
+        energies = torch.vstack([d[1] for d in data]).to(device=device)
 
         if data[0][2] is not None:
-            forces = torch.vstack([d[2] for d in data])
+            forces = torch.vstack([d[2] for d in data]).to(device=device)
         else:
             forces = None
 

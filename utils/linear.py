@@ -1,13 +1,10 @@
 import numpy as np
 import torch
 
-from .operations import structure_sum, normalize
-
 
 class LinearModel(torch.nn.Module):
     def __init__(
         self,
-        normalize,
         regularizer,
         optimizable_weights=False,
         random_initial_weights=False,
@@ -15,7 +12,6 @@ class LinearModel(torch.nn.Module):
         super().__init__()
 
         self.regularizer = regularizer
-        self.normalize = normalize
 
         self.weights = None
         self.baseline = 0.0
@@ -23,28 +19,23 @@ class LinearModel(torch.nn.Module):
         self.optimizable_weights = optimizable_weights
         self.random_initial_weights = random_initial_weights
 
-    def initialize_parameters(self, power_spectrum, energies, forces=None):
+    def initialize_model_weights(self, descriptor, energies, forces=None):
         # TODO: do we want a baseline?
         # self.baseline = energies.mean()
 
         if self.random_initial_weights:
-            ps = power_spectrum.block().values
-            weights = torch.rand((ps.shape[1], 1), device=ps.device)
+            X = descriptor.block().values
+            weights = torch.rand((X.shape[1], 1), device=X.device)
         else:
-            weights = self._fit_linear_model(power_spectrum, energies, forces)
+            weights = self._fit_linear_model(descriptor, energies, forces)
 
         if self.optimizable_weights:
             self.weights = torch.nn.Parameter(weights.detach())
         else:
             self.weights = weights
 
-    def _fit_linear_model(self, power_spectrum, energies, forces):
-        ps_per_structure = structure_sum(power_spectrum)
-
-        if self.normalize:
-            ps_per_structure = normalize(ps_per_structure)
-
-        block = ps_per_structure.block()
+    def _fit_linear_model(self, descriptor, energies, forces):
+        block = descriptor.block()
         assert len(block.components) == 0
 
         X = block.values
@@ -90,20 +81,15 @@ class LinearModel(torch.nn.Module):
             grad_idx = np.arange(len(energies), stop=X_XT.shape[0])
             X_XT[grad_idx, grad_idx] += forces_regularizer
 
-        weights = X.T @ torch.linalg.inv(X_XT) @ Y
+        weights = X.T @ torch.linalg.solve(X_XT, Y)
 
         return weights
 
-    def forward(self, power_spectrum, with_forces=False):
+    def forward(self, descriptor, with_forces=False):
         if self.weights is None:
             raise Exception("call initialize_weights first")
 
-        ps_per_structure = structure_sum(power_spectrum)
-
-        if self.normalize:
-            ps_per_structure = normalize(ps_per_structure)
-
-        block = ps_per_structure.block()
+        block = descriptor.block()
         assert len(block.components) == 0
 
         X = block.values
