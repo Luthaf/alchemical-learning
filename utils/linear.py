@@ -111,12 +111,11 @@ class LinearModel(torch.nn.Module):
         energies = X @ self.weights + self.baseline
 
         if with_forces:
-            raise ValueError("not checked yet")
-            # gradient = block.gradient("positions")
-            # X_grad = gradient.data.reshape(-1, 3, self.weights.shape[0])
+            gradient = block.gradient("positions")
+            X_grad = gradient.data.reshape(-1, 3, self.weights.shape[0])
 
-            # forces = -X_grad @ self.weights
-            # forces = forces.reshape(-1, 3)
+            forces = -X_grad @ self.weights
+            forces = forces.reshape(-1, 3)
         else:
             forces = None
 

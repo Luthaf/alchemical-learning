@@ -39,20 +39,51 @@ class AlchemicalCombine(torch.nn.Module):
             n_samples, n_components, _ = block.values.shape
             data = block.values.reshape(n_samples, n_components, n_species, n_radial)
 
-            data = data.swapaxes(2, 3)
+            data = data.swapaxes(-1, -2)
             data = data @ self.combining_matrix
 
-            data = data.swapaxes(2, 3)
+            data = data.swapaxes(-1, -2)
             data = data.reshape(n_samples, n_components, n_radial * n_pseudo_species)
 
-            blocks.append(
-                TensorBlock(
-                    values=data,
-                    samples=block.samples,
-                    components=block.components,
-                    properties=properties,
-                )
+            new_block = TensorBlock(
+                values=data,
+                samples=block.samples,
+                components=block.components,
+                properties=properties,
             )
+
+            if block.has_gradient("positions"):
+                gradient = block.gradient("positions")
+
+                n_grad_samples, n_cartesian, n_spherical, _ = gradient.data.shape
+
+                data = gradient.data.reshape(
+                    n_grad_samples,
+                    n_cartesian,
+                    n_spherical,
+                    n_species,
+                    n_radial,
+                )
+
+                data = data.swapaxes(-1, -2)
+                data = data @ self.combining_matrix
+
+                data = data.swapaxes(-1, -2)
+                data = data.reshape(
+                    n_grad_samples,
+                    n_cartesian,
+                    n_spherical,
+                    n_radial * n_pseudo_species,
+                )
+
+                new_block.add_gradient(
+                    "positions",
+                    data,
+                    gradient.samples,
+                    gradient.components,
+                )
+
+            blocks.append(new_block)
 
         return TensorMap(spherical_expansion.keys, blocks)
 
