@@ -3,6 +3,6 @@ torch
 
 ase
 rascaline @ https://github.com/Luthaf/rascaline/archive/6497955a1cdd1d2a2e5f5aa69eb586684389d5f0.zip
-equistore @ https://github.com/lab-cosmo/equistore/archive/f2c1db69d1fbfdcc7b4c8952809ba60aa381d309.zip
+equistore @ https://github.com/lab-cosmo/equistore/archive/aa9cde9ad1329d1d4b9763f47065f55662e3168c.zip
 scikit-learn
 skcosmo
