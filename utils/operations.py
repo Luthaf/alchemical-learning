@@ -202,3 +202,18 @@ class SumStructures(torch.nn.Module):
             blocks.append(new_block)
 
         return TensorMap(keys=descriptor.keys, blocks=blocks)
+
+
+def remove_gradient(tensor):
+    blocks = []
+    for _, block in tensor:
+        blocks.append(
+            TensorBlock(
+                values=block.values,
+                samples=block.samples,
+                components=block.components,
+                properties=block.properties,
+            )
+        )
+
+    return TensorMap(keys=tensor.keys, blocks=blocks)

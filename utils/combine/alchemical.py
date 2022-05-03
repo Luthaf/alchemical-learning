@@ -7,7 +7,7 @@ from collections import namedtuple
 import sklearn.decomposition
 
 
-class AlchemicalCombine(torch.nn.Module):
+class CombineSpecies(torch.nn.Module):
     def __init__(self, species, n_pseudo_species):
         super().__init__()
         coupling = _species_coupling_matrix(species)
