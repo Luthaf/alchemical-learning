@@ -15,7 +15,9 @@ class AlchemicalCombine(torch.nn.Module):
 
         self.species_remapping = {species: i for i, species in enumerate(species)}
         self.combining_matrix = torch.nn.Parameter(
-            torch.tensor(pca.fit_transform(coupling)).contiguous()
+            torch.tensor(pca.fit_transform(coupling))
+            .contiguous()
+            .to(dtype=torch.get_default_dtype())
         )
 
     def forward(self, spherical_expansion: TensorMap):

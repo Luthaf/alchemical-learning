@@ -14,7 +14,7 @@ def _move_to_torch(tensor_map, structure_i):
         samples = Labels(block.samples.names, samples)
 
         new_block = TensorBlock(
-            values=torch.tensor(block.values),
+            values=torch.tensor(block.values).to(dtype=torch.get_default_dtype()),
             samples=samples,
             components=block.components,
             properties=block.properties,
@@ -33,7 +33,7 @@ def _move_to_torch(tensor_map, structure_i):
 
             new_block.add_gradient(
                 parameter=parameter,
-                data=torch.tensor(gradient.data),
+                data=torch.tensor(gradient.data).to(dtype=torch.get_default_dtype()),
                 samples=gradient_samples,
                 components=gradient.components,
             )
