@@ -1,46 +1,63 @@
 import torch
 import numpy as np
+import copy
 
 from equistore import TensorBlock, TensorMap, Labels
 from .rascaline import RascalineSphericalExpansion
 
 
+def _block_to_torch(block, structure_i):
+    assert block.samples.names == ("structure", "center", "center_species")
+    samples = block.samples.view(dtype=np.int32).reshape(-1, 3).copy()
+    samples[:, 0] = structure_i
+    samples = Labels(block.samples.names, samples)
+
+    new_block = TensorBlock(
+        values=torch.tensor(block.values).to(dtype=torch.get_default_dtype()),
+        samples=samples,
+        components=block.components,
+        properties=block.properties,
+    )
+
+    for parameter in block.gradients_list():
+        gradient = block.gradient(parameter)
+
+        assert gradient.samples.names == ("sample", "structure", "atom")
+
+        gradient_samples = gradient.samples.view(dtype=np.int32).reshape(-1, 3).copy()
+        gradient_samples[:, 1] = structure_i
+        gradient_samples = Labels(gradient.samples.names, gradient_samples)
+
+        new_block.add_gradient(
+            parameter=parameter,
+            data=torch.tensor(gradient.data).to(dtype=torch.get_default_dtype()),
+            samples=gradient_samples,
+            components=gradient.components,
+        )
+
+    return new_block
+
+
 def _move_to_torch(tensor_map, structure_i):
     blocks = []
     for _, block in tensor_map:
-        assert block.samples.names == ("structure", "center", "center_species")
-        samples = block.samples.view(dtype=np.int32).reshape(-1, 3).copy()
-        samples[:, 0] = structure_i
-        samples = Labels(block.samples.names, samples)
-
-        new_block = TensorBlock(
-            values=torch.tensor(block.values).to(dtype=torch.get_default_dtype()),
-            samples=samples,
-            components=block.components,
-            properties=block.properties,
-        )
-
-        for parameter in block.gradients_list():
-            gradient = block.gradient(parameter)
-
-            assert gradient.samples.names == ("sample", "structure", "atom")
-
-            gradient_samples = (
-                gradient.samples.view(dtype=np.int32).reshape(-1, 3).copy()
-            )
-            gradient_samples[:, 1] = structure_i
-            gradient_samples = Labels(gradient.samples.names, gradient_samples)
-
-            new_block.add_gradient(
-                parameter=parameter,
-                data=torch.tensor(gradient.data).to(dtype=torch.get_default_dtype()),
-                samples=gradient_samples,
-                components=gradient.components,
-            )
-
-        blocks.append(new_block)
+        blocks.append(_block_to_torch(block, structure_i))
 
     return TensorMap(tensor_map.keys, blocks)
+
+
+def _move_to_torch_by_l(tensor_maps, structure_i):
+    keys = Labels(
+        names=["spherical_harmonics_l"],
+        values=np.array(list(tensor_maps.keys()), dtype=np.int32).reshape(-1, 1),
+    )
+
+    blocks = []
+    for l, tensor_map in tensor_maps.items():
+        block = tensor_map.block(spherical_harmonics_l=l)
+        blocks.append(_block_to_torch(block, structure_i))
+
+    return TensorMap(keys, blocks)
 
 
 class AtomisticDataset(torch.utils.data.Dataset):
@@ -50,17 +67,41 @@ class AtomisticDataset(torch.utils.data.Dataset):
             values=np.array(all_species, dtype=np.int32).reshape(-1, 1),
         )
 
-        calculator = RascalineSphericalExpansion(hypers)
-
         self.spherical_expansions = []
-        for frame_i, frame in enumerate(frames):
-            spherical_expansion = calculator.compute(frame)
-            spherical_expansion.keys_to_samples("center_species")
-            spherical_expansion.keys_to_properties(all_species)
+        hypers = copy.deepcopy(hypers)
+        if "radial_per_angular" in hypers:
+            radial_per_angular = hypers.pop("radial_per_angular")
 
-            self.spherical_expansions.append(
-                _move_to_torch(spherical_expansion, frame_i)
-            )
+            calculators = {}
+            for l, n in radial_per_angular.items():
+                new_hypers = copy.deepcopy(hypers)
+                new_hypers["max_angular"] = l
+                new_hypers["max_radial"] = n
+                calculators[l] = RascalineSphericalExpansion(new_hypers)
+
+            for frame_i, frame in enumerate(frames):
+                spherical_expansion_by_l = {}
+                for l, calculator in calculators.items():
+                    spherical_expansion = calculator.compute(frame)
+                    spherical_expansion.keys_to_samples("center_species")
+                    spherical_expansion.keys_to_properties(all_species)
+                    spherical_expansion_by_l[l] = spherical_expansion
+
+                self.spherical_expansions.append(
+                    _move_to_torch_by_l(spherical_expansion_by_l, frame_i)
+                )
+
+        else:
+            calculator = RascalineSphericalExpansion(hypers)
+
+            for frame_i, frame in enumerate(frames):
+                spherical_expansion = calculator.compute(frame)
+                spherical_expansion.keys_to_samples("center_species")
+                spherical_expansion.keys_to_properties(all_species)
+
+                self.spherical_expansions.append(
+                    _move_to_torch(spherical_expansion, frame_i)
+                )
 
         self.frames = frames
 

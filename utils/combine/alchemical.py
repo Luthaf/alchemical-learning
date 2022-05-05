@@ -26,18 +26,18 @@ class CombineSpecies(torch.nn.Module):
 
         n_species, n_pseudo_species = self.combining_matrix.shape
 
-        radial = np.unique(spherical_expansion.block(0).properties["n"])
-        n_radial = len(radial)
-        properties = Labels(
-            names=["neighbor_species", "n"],
-            values=np.array(
-                [[-s, n] for s in range(n_pseudo_species) for n in radial],
-                dtype=np.int32,
-            ),
-        )
-
         blocks = []
         for _, block in spherical_expansion:
+            radial = np.unique(block.properties["n"])
+            n_radial = len(radial)
+            properties = Labels(
+                names=["neighbor_species", "n"],
+                values=np.array(
+                    [[-s, n] for s in range(n_pseudo_species) for n in radial],
+                    dtype=np.int32,
+                ),
+            )
+
             n_samples, n_components, _ = block.values.shape
             data = block.values.reshape(n_samples, n_components, n_species, n_radial)
 
