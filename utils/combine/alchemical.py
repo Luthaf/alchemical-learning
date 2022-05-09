@@ -8,16 +8,27 @@ import sklearn.decomposition
 
 
 class CombineSpecies(torch.nn.Module):
-    def __init__(self, species, n_pseudo_species):
+    def __init__(self, species, n_pseudo_species, *, explicit_combining_matrix=None):
         super().__init__()
         coupling = _species_coupling_matrix(species)
         pca = sklearn.decomposition.PCA(n_components=n_pseudo_species)
 
         self.species_remapping = {species: i for i, species in enumerate(species)}
-        self.combining_matrix = torch.nn.Parameter(
-            torch.tensor(pca.fit_transform(coupling))
-            .contiguous()
-            .to(dtype=torch.get_default_dtype())
+
+        if explicit_combining_matrix is None:
+            self.combining_matrix = torch.nn.Parameter(
+                torch.tensor(pca.fit_transform(coupling))
+                .contiguous()
+                .to(dtype=torch.get_default_dtype())
+            )
+        else:
+            self.register_buffer("combining_matrix", explicit_combining_matrix)
+
+    def detach(self):
+        return CombineSpecies(
+            list(self.species_remapping.keys()),
+            self.combining_matrix.shape[1],
+            explicit_combining_matrix=self.combining_matrix.clone().detach()
         )
 
     def forward(self, spherical_expansion: TensorMap):

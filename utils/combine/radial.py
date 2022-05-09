@@ -5,10 +5,21 @@ from equistore import TensorMap, Labels, TensorBlock
 
 
 class CombineRadial(torch.nn.Module):
-    def __init__(self, max_radial, n_combined_radial):
+    def __init__(self, max_radial, n_combined_radial, *, explicit_combining_matrix=None):
         super().__init__()
-        self.combining_matrix = torch.nn.Parameter(
-            torch.rand((max_radial, n_combined_radial))
+
+        if explicit_combining_matrix is None:
+            self.combining_matrix = torch.nn.Parameter(
+                torch.rand((max_radial, n_combined_radial))
+            )
+        else:
+            self.register_buffer("combining_matrix", explicit_combining_matrix)
+
+    def detach(self):
+        return CombineRadialSpecies(
+            self.combining_matrix.shape[0],
+            self.combining_matrix.shape[1],
+            explicit_combining_matrix=self.combining_matrix.clone().detach()
         )
 
     def forward(self, spherical_expansion: TensorMap):
