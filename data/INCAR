@@ -1,0 +1,52 @@
+#Startparameter for this run:
+   ADDGRID= T
+
+   SYSTEM= system_name
+   PREC=   Accurate   #high depends on ENAUG
+   ISTART= 0          #job   : 0-new  1-cont  2-samecut
+   ICHARG= 1          #charge: 1-file 2-atom 10-const
+   LASPH=  T          #aspherical contributions
+
+   ISPIN=  1
+   LORBIT= 10
+
+#Electronic Relaxation 1
+   ENCUT=   550
+   NELM=    200    #max SCF steps
+   NELMIN=  4      #min SCF steps
+   EDIFF=   1E-6   #stopping-criterion for ELM
+   LREAL=   F      #F
+   VOSKOWN= 1      #Vosko Wilk Nusair interpolation
+
+   GGA= PS   #PBEsol
+
+#Ionic relaxation
+#   NSW=     50    #number of steps for IOM
+
+   ISIF= 3
+   EDIFFG= -0.001    # RH
+
+   IBRION= 2     #ionic relax: 0-MD 1-quasi-New 2-CG
+   POTIM=  0.1   #time-step for ionic-motion
+   ISYM=   0     #0-off
+
+#DOS related values:
+   ISMEAR= 1        #1st order Methfessel-Paxton, -5 tetrahedron 
+   SIGMA=  0.2      #broadening in eV
+
+#Electronic relaxation 2 (details)
+   ALGO= N    #algorithm
+
+#Write flags
+   LWAVE=  F    #write WAVECAR
+   LCHARG= T    #write CHGCAR
+   LELF=   F    #write electronic localiz. function (ELF)
+
+#Parallelization
+   LPLANE= T    # T for not very many nodes
+ NCORE= 18
+   LSCALU= F
+   NSIM=   4
+
+# MAGMOM= 12*0  6*1  6*-1  24*0
+ 
