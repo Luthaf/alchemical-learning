@@ -1,8 +1,9 @@
-import torch
-import numpy as np
 import copy
 
-from equistore import TensorBlock, TensorMap, Labels
+import numpy as np
+import torch
+from equistore import Labels, TensorBlock, TensorMap
+
 from .rascaline import RascalineSphericalExpansion
 
 
@@ -61,14 +62,48 @@ def _move_to_torch_by_l(tensor_maps, structure_i):
 
 
 class AtomisticDataset(torch.utils.data.Dataset):
-    def __init__(self, frames, all_species, hypers, energies, forces=None):
-        all_species = Labels(
+    def __init__(
+        self,
+        frames,
+        all_species,
+        hypers,
+        energies,
+        forces=None,
+        radial_spectrum_n_max=None,
+    ):
+        all_neighbor_species = Labels(
             names=["neighbor_species"],
             values=np.array(all_species, dtype=np.int32).reshape(-1, 1),
         )
+        all_center_species = Labels(
+            names=["center_species"],
+            values=np.array(all_species, dtype=np.int32).reshape(-1, 1),
+        )
+
+        self.radial_spectrum = []
+        hypers = copy.deepcopy(hypers)
+        if radial_spectrum_n_max is not None:
+            new_hypers = copy.deepcopy(hypers)
+            new_hypers["max_angular"] = 0
+            new_hypers["max_radial"] = radial_spectrum_n_max
+            calculator = RascalineSphericalExpansion(new_hypers)
+
+            for frame_i, frame in enumerate(frames):
+                spherical_expansion = calculator.compute(frame)
+                spherical_expansion.keys_to_properties(all_center_species)
+
+                # TODO: these don't hurt, but are confusing, let's remove them
+                spherical_expansion.components_to_properties("spherical_harmonics_m")
+                spherical_expansion.keys_to_properties("spherical_harmonics_l")
+
+                spherical_expansion.keys_to_properties(all_neighbor_species)
+                self.radial_spectrum.append(
+                    _move_to_torch(spherical_expansion, frame_i)
+                )
+        else:
+            self.radial_spectrum = [None] * len(frames)
 
         self.spherical_expansions = []
-        hypers = copy.deepcopy(hypers)
         if "radial_per_angular" in hypers:
             radial_per_angular = hypers.pop("radial_per_angular")
 
@@ -84,7 +119,7 @@ class AtomisticDataset(torch.utils.data.Dataset):
                 for l, calculator in calculators.items():
                     spherical_expansion = calculator.compute(frame)
                     spherical_expansion.keys_to_samples("center_species")
-                    spherical_expansion.keys_to_properties(all_species)
+                    spherical_expansion.keys_to_properties(all_neighbor_species)
                     spherical_expansion_by_l[l] = spherical_expansion
 
                 self.spherical_expansions.append(
@@ -97,7 +132,7 @@ class AtomisticDataset(torch.utils.data.Dataset):
             for frame_i, frame in enumerate(frames):
                 spherical_expansion = calculator.compute(frame)
                 spherical_expansion.keys_to_samples("center_species")
-                spherical_expansion.keys_to_properties(all_species)
+                spherical_expansion.keys_to_properties(all_neighbor_species)
 
                 self.spherical_expansions.append(
                     _move_to_torch(spherical_expansion, frame_i)
@@ -126,78 +161,95 @@ class AtomisticDataset(torch.utils.data.Dataset):
         else:
             forces = self.forces[idx]
 
-        return (self.spherical_expansions[idx], self.energies[idx], forces)
+        return (
+            self.frames[idx],
+            self.radial_spectrum[idx],
+            self.spherical_expansions[idx],
+            self.energies[idx],
+            forces,
+        )
+
+
+def _collate_tensor_map(tensors, device):
+    keys = tensors[0].keys
+
+    blocks = []
+    for key in keys:
+        first_block = tensors[0].block(key)
+        if first_block.has_gradient("positions"):
+            first_block_grad = first_block.gradient("positions")
+        else:
+            first_block_grad = None
+
+        samples = []
+        values = []
+
+        grad_samples = []
+        grad_data = []
+        previous_samples_count = 0
+        for tensor in tensors:
+            block = tensor.block(key)
+
+            new_samples = block.samples.view(dtype=np.int32).reshape(-1, 3)
+            samples.append(new_samples)
+            values.append(block.values)
+
+            if block.has_gradient("positions"):
+                gradient = block.gradient("positions")
+
+                new_grad_samples = (
+                    gradient.samples.view(dtype=np.int32).reshape(-1, 3).copy()
+                )
+                new_grad_samples[:, 0] += previous_samples_count
+                grad_samples.append(new_grad_samples)
+
+                grad_data.append(gradient.data)
+
+            previous_samples_count += new_samples.shape[0]
+
+        new_block = TensorBlock(
+            values=torch.vstack(values).to(device),
+            samples=Labels(
+                ["structure", "center", "species_center"],
+                np.vstack(samples),
+            ),
+            components=first_block.components,
+            properties=first_block.properties,
+        )
+        if first_block_grad is not None:
+            new_block.add_gradient(
+                "positions",
+                data=torch.vstack(grad_data).to(device),
+                samples=Labels(
+                    ["sample", "structure", "atom"],
+                    np.vstack(grad_samples),
+                ),
+                components=first_block_grad.components,
+            )
+
+        blocks.append(new_block)
+
+    return TensorMap(keys, blocks)
 
 
 def _collate_data(device):
     def do_collate(data):
-        keys = data[0][0].keys
+        frames = [d[0] for d in data]
 
-        blocks = []
-        for key in keys:
-            first_block = data[0][0].block(key)
-            if first_block.has_gradient("positions"):
-                first_block_grad = first_block.gradient("positions")
-            else:
-                first_block_grad = None
+        radial_spectrum = [d[1] for d in data]
+        if radial_spectrum[0] is not None:
+            radial_spectrum = _collate_tensor_map(radial_spectrum, device)
 
-            samples = []
-            values = []
+        spherical_expansion = _collate_tensor_map([d[2] for d in data], device)
 
-            grad_samples = []
-            grad_data = []
-            previous_samples_count = 0
-            for spx, _, _ in data:
-                block = spx.block(key)
+        energies = torch.vstack([d[3] for d in data]).to(device=device)
 
-                new_samples = block.samples.view(dtype=np.int32).reshape(-1, 3)
-                samples.append(new_samples)
-                values.append(block.values)
-
-                if block.has_gradient("positions"):
-                    gradient = block.gradient("positions")
-
-                    new_grad_samples = (
-                        gradient.samples.view(dtype=np.int32).reshape(-1, 3).copy()
-                    )
-                    new_grad_samples[:, 0] += previous_samples_count
-                    grad_samples.append(new_grad_samples)
-
-                    grad_data.append(gradient.data)
-
-                previous_samples_count += new_samples.shape[0]
-
-            new_block = TensorBlock(
-                values=torch.vstack(values).to(device),
-                samples=Labels(
-                    ["structure", "center", "species_center"],
-                    np.vstack(samples),
-                ),
-                components=first_block.components,
-                properties=first_block.properties,
-            )
-            if first_block_grad is not None:
-                new_block.add_gradient(
-                    "positions",
-                    data=torch.vstack(grad_data).to(device),
-                    samples=Labels(
-                        ["sample", "structure", "atom"],
-                        np.vstack(grad_samples),
-                    ),
-                    components=first_block_grad.components,
-                )
-
-            blocks.append(new_block)
-
-        spherical_expansion = TensorMap(keys, blocks)
-        energies = torch.vstack([d[1] for d in data]).to(device=device)
-
-        if data[0][2] is not None:
-            forces = torch.vstack([d[2] for d in data]).to(device=device)
+        if data[0][4] is not None:
+            forces = torch.vstack([d[4] for d in data]).to(device=device)
         else:
             forces = None
 
-        return spherical_expansion, energies, forces
+        return frames, radial_spectrum, spherical_expansion, energies, forces
 
     return do_collate
 
