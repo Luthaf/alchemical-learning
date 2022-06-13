@@ -8,8 +8,10 @@ from .rascaline import RascalineSphericalExpansion
 
 
 def _block_to_torch(block, structure_i):
-    assert block.samples.names == ("structure", "center", "center_species")
-    samples = block.samples.view(dtype=np.int32).reshape(-1, 3).copy()
+    assert block.samples.names[0] == "structure"
+    samples = (
+        block.samples.view(dtype=np.int32).reshape(-1, len(block.samples.names)).copy()
+    )
     samples[:, 0] = structure_i
     samples = Labels(block.samples.names, samples)
 
@@ -190,7 +192,9 @@ def _collate_tensor_map(tensors, device):
         for tensor in tensors:
             block = tensor.block(key)
 
-            new_samples = block.samples.view(dtype=np.int32).reshape(-1, 3)
+            new_samples = block.samples.view(dtype=np.int32).reshape(
+                -1, len(block.samples.names)
+            )
             samples.append(new_samples)
             values.append(block.values)
 
@@ -210,7 +214,7 @@ def _collate_tensor_map(tensors, device):
         new_block = TensorBlock(
             values=torch.vstack(values).to(device),
             samples=Labels(
-                ["structure", "center", "species_center"],
+                block.samples.names,
                 np.vstack(samples),
             ),
             components=first_block.components,
@@ -237,7 +241,9 @@ def _collate_data(device):
         frames = [d[0] for d in data]
 
         radial_spectrum = [d[1] for d in data]
-        if radial_spectrum[0] is not None:
+        if radial_spectrum[0] is None:
+            radial_spectrum = None
+        else:
             radial_spectrum = _collate_tensor_map(radial_spectrum, device)
 
         spherical_expansion = _collate_tensor_map([d[2] for d in data], device)

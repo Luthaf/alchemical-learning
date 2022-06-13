@@ -14,14 +14,11 @@ class LinearModel(torch.nn.Module):
         self.regularizer = regularizer
 
         self.weights = None
-        self.baseline = 0.0
 
         self.optimizable_weights = optimizable_weights
         self.random_initial_weights = random_initial_weights
 
     def initialize_model_weights(self, descriptor, energies, forces=None):
-        # TODO: do we want a baseline?
-        # self.baseline = energies.mean()
 
         if self.random_initial_weights:
             X = descriptor.block().values
@@ -40,7 +37,7 @@ class LinearModel(torch.nn.Module):
 
         X = block.values
 
-        Y = energies.reshape(-1, 1) - self.baseline
+        Y = energies.reshape(-1, 1)
 
         delta = energies.std()
         structures = np.unique(block.samples["structure"])
@@ -94,7 +91,7 @@ class LinearModel(torch.nn.Module):
 
         X = block.values
 
-        energies = X @ self.weights + self.baseline
+        energies = X @ self.weights
 
         if with_forces:
             gradient = block.gradient("positions")
