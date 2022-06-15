@@ -4,6 +4,35 @@ import math
 
 from equistore import Labels, TensorBlock, TensorMap
 
+class CompositionFeatures(torch.nn.Module):
+    def __init__(self, 
+        all_species
+    ):
+        super().__init__()
+        self.species_dict = {s:i for i,s in enumerate(all_species)}    
+    
+    def forward(self, frames) -> TensorMap:
+        
+        data = torch.zeros(size=(len(frames), len(self.species_dict)))
+        for i, f in enumerate(frames):
+            for s in f.numbers:
+                data[i,self.species_dict[s]] += 1
+        properties = Labels(
+            names=["n_species"],
+            values = np.array(list(self.species_dict.keys()), dtype=np.int32).reshape(-1,1)
+        )
+        
+        samples = Labels( names = ["structure"], values = np.arange(len(frames),dtype=np.int32).reshape(-1,1)) 
+        
+        block = TensorBlock(
+            values=data, 
+            samples=samples,
+            components=[],
+            properties=properties)
+        descriptor = TensorMap(Labels.single(),blocks=[block])
+        return descriptor
+
+
 
 class PowerSpectrum(torch.nn.Module):
     def __init__(self):
