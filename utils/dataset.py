@@ -8,7 +8,8 @@ from rascaline import SphericalExpansion
 
 def _block_to_torch(block, structure_i):
     assert block.samples.names[0] == "structure"
-    samples = block.samples.view(dtype=np.int32).reshape(-1, 3).copy()
+    print(block.samples.names)
+    samples = block.samples.view(dtype=np.int32).reshape(-1, len(block.samples.names)).copy()
     samples[:, 0] = structure_i
     samples = Labels(block.samples.names, samples)
 
@@ -24,7 +25,7 @@ def _block_to_torch(block, structure_i):
 
         assert gradient.samples.names == ("sample", "structure", "atom")
 
-        gradient_samples = gradient.samples.view(dtype=np.int32).reshape(-1, 3).copy()
+        gradient_samples = gradient.samples.view(dtype=np.int32).reshape(-1, len(gradient.samples.names)).copy()
         gradient_samples[:, 1] = structure_i
         gradient_samples = Labels(gradient.samples.names, gradient_samples)
 
