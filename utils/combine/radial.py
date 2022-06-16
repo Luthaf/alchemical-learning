@@ -1,11 +1,12 @@
-import torch
 import numpy as np
-
-from equistore import TensorMap, Labels, TensorBlock
+import torch
+from equistore import Labels, TensorBlock, TensorMap
 
 
 class CombineRadial(torch.nn.Module):
-    def __init__(self, max_radial, n_combined_radial, *, explicit_combining_matrix=None):
+    def __init__(
+        self, max_radial, n_combined_radial, *, explicit_combining_matrix=None
+    ):
         super().__init__()
 
         if explicit_combining_matrix is None:
@@ -16,22 +17,22 @@ class CombineRadial(torch.nn.Module):
             self.register_buffer("combining_matrix", explicit_combining_matrix)
 
     def detach(self):
-        return CombineRadialSpecies(
+        return CombineRadial(
             self.combining_matrix.shape[0],
             self.combining_matrix.shape[1],
-            explicit_combining_matrix=self.combining_matrix.clone().detach()
+            explicit_combining_matrix=self.combining_matrix.clone().detach(),
         )
 
     def forward(self, spherical_expansion: TensorMap):
         assert spherical_expansion.keys.names == ("spherical_harmonics_l",)
-        assert spherical_expansion.property_names == ("neighbor_species", "n")
+        assert spherical_expansion.property_names == ("species_neighbor", "n")
 
         n_radial, n_combined_radial = self.combining_matrix.shape
 
         radial = np.unique(spherical_expansion.block(0).properties["n"])
         assert len(radial) == n_radial
 
-        species = np.unique(spherical_expansion.block(0).properties["neighbor_species"])
+        species = np.unique(spherical_expansion.block(0).properties["species_neighbor"])
         n_species = len(species)
 
         properties = Labels(

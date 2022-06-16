@@ -1,7 +1,7 @@
-import torch
 from typing import Optional
-import numpy as np
 
+import numpy as np
+import torch
 from equistore import Labels, TensorBlock, TensorMap
 
 

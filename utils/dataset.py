@@ -3,12 +3,11 @@ import copy
 import numpy as np
 import torch
 from equistore import Labels, TensorBlock, TensorMap
-
-from .rascaline import RascalineSphericalExpansion
+from rascaline import SphericalExpansion
 
 
 def _block_to_torch(block, structure_i):
-    assert block.samples.names == ("structure", "center", "center_species")
+    assert block.samples.names[0] == "structure"
     samples = block.samples.view(dtype=np.int32).reshape(-1, 3).copy()
     samples[:, 0] = structure_i
     samples = Labels(block.samples.names, samples)
@@ -72,11 +71,11 @@ class AtomisticDataset(torch.utils.data.Dataset):
         radial_spectrum_n_max=None,
     ):
         all_neighbor_species = Labels(
-            names=["neighbor_species"],
+            names=["species_neighbor"],
             values=np.array(all_species, dtype=np.int32).reshape(-1, 1),
         )
         all_center_species = Labels(
-            names=["center_species"],
+            names=["species_center"],
             values=np.array(all_species, dtype=np.int32).reshape(-1, 1),
         )
 
@@ -86,7 +85,7 @@ class AtomisticDataset(torch.utils.data.Dataset):
             new_hypers = copy.deepcopy(hypers)
             new_hypers["max_angular"] = 0
             new_hypers["max_radial"] = radial_spectrum_n_max
-            calculator = RascalineSphericalExpansion(new_hypers)
+            calculator = SphericalExpansion(**new_hypers)
 
             for frame_i, frame in enumerate(frames):
                 spherical_expansion = calculator.compute(frame)
@@ -112,13 +111,13 @@ class AtomisticDataset(torch.utils.data.Dataset):
                 new_hypers = copy.deepcopy(hypers)
                 new_hypers["max_angular"] = l
                 new_hypers["max_radial"] = n
-                calculators[l] = RascalineSphericalExpansion(new_hypers)
+                calculators[l] = SphericalExpansion(**new_hypers)
 
             for frame_i, frame in enumerate(frames):
                 spherical_expansion_by_l = {}
                 for l, calculator in calculators.items():
                     spherical_expansion = calculator.compute(frame)
-                    spherical_expansion.keys_to_samples("center_species")
+                    spherical_expansion.keys_to_samples("species_center")
                     spherical_expansion.keys_to_properties(all_neighbor_species)
                     spherical_expansion_by_l[l] = spherical_expansion
 
@@ -127,11 +126,11 @@ class AtomisticDataset(torch.utils.data.Dataset):
                 )
 
         else:
-            calculator = RascalineSphericalExpansion(hypers)
+            calculator = SphericalExpansion(**hypers)
 
             for frame_i, frame in enumerate(frames):
                 spherical_expansion = calculator.compute(frame)
-                spherical_expansion.keys_to_samples("center_species")
+                spherical_expansion.keys_to_samples("species_center")
                 spherical_expansion.keys_to_properties(all_neighbor_species)
 
                 self.spherical_expansions.append(
