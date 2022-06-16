@@ -1,11 +1,12 @@
-import torch
 import numpy as np
-
-from equistore import TensorMap, TensorBlock, Labels
+import torch
+from equistore import Labels, TensorBlock, TensorMap
 
 
 class CombineRadialSpecies(torch.nn.Module):
-    def __init__(self, n_species, max_radial, n_combined_basis, *, explicit_combining_matrix=None):
+    def __init__(
+        self, n_species, max_radial, n_combined_basis, *, explicit_combining_matrix=None
+    ):
         super().__init__()
         self.n_species = n_species
         self.max_radial = max_radial
@@ -27,7 +28,7 @@ class CombineRadialSpecies(torch.nn.Module):
 
     def forward(self, spherical_expansion: TensorMap):
         assert spherical_expansion.keys.names == ("spherical_harmonics_l",)
-        assert spherical_expansion.property_names == ("neighbor_species", "n")
+        assert spherical_expansion.property_names == ("species_neighbor", "n")
 
         n_properties, n_combined_basis = self.combining_matrix.shape
 

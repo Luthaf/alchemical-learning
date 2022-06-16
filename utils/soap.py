@@ -1,7 +1,7 @@
-import numpy as np
-import torch
 import math
 
+import numpy as np
+import torch
 from equistore import Labels, TensorBlock, TensorMap
 
 class CompositionFeatures(torch.nn.Module):
@@ -85,43 +85,17 @@ class PowerSpectrum(torch.nn.Module):
                 assert np.all(gradient_1.samples == gradient_2.samples)
                 gradients_samples = gradient_1.samples
 
-                # gradients_samples = np.unique(
-                #     np.concatenate([gradient_1.samples, gradient_2.samples])
-                # )
-                # gradients_samples = gradients_samples.view(np.int32).reshape(-1, 3)
-
-                # gradients_samples = Labels(
-                #     names=gradient_1.samples.names, values=gradients_samples
-                # )
-
-                # gradients_sample_mapping = {
-                #     tuple(sample): i for i, sample in enumerate(gradients_samples)
-                # }
-
-                # gradient_data = torch.zeros(
-                #     (gradients_samples.shape[0], 3, n_properties),
-                #     device=gradient_1.data.device,
-                # )
-
                 gradient_data = factor * torch.einsum(
                     "ixma, imb -> ixab",
                     gradient_1.data,
                     spx_2.values[gradient_1.samples["sample"].tolist(), :, :],
                 ).reshape(gradients_samples.shape[0], 3, -1)
 
-                # for sample, row in zip(gradient_1.samples, gradient_data_1):
-                #     new_row = gradients_sample_mapping[tuple(sample)]
-                #     gradient_data[new_row, :, :] += row
-
                 gradient_data += factor * torch.einsum(
                     "ima, ixmb -> ixab",
                     spx_1.values[gradient_2.samples["sample"].tolist(), :, :],
                     gradient_2.data,
                 ).reshape(gradients_samples.shape[0], 3, -1)
-
-                # for sample, row in zip(gradient_2.samples, gradient_data_2):
-                #     new_row = gradients_sample_mapping[tuple(sample)]
-                #     gradient_data[new_row, :, :] += row
 
                 assert gradient_1.components[0].names == ("gradient_direction",)
                 block.add_gradient(

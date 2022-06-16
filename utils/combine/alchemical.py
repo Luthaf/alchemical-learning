@@ -1,10 +1,9 @@
-import torch
-import numpy as np
-
-from equistore import TensorMap, Labels, TensorBlock
-
 from collections import namedtuple
+
+import numpy as np
 import sklearn.decomposition
+import torch
+from equistore import Labels, TensorBlock, TensorMap
 
 
 class CombineSpecies(torch.nn.Module):
@@ -28,12 +27,12 @@ class CombineSpecies(torch.nn.Module):
         return CombineSpecies(
             list(self.species_remapping.keys()),
             self.combining_matrix.shape[1],
-            explicit_combining_matrix=self.combining_matrix.clone().detach()
+            explicit_combining_matrix=self.combining_matrix.clone().detach(),
         )
 
     def forward(self, spherical_expansion: TensorMap):
         assert spherical_expansion.keys.names == ("spherical_harmonics_l",)
-        assert spherical_expansion.property_names == ("neighbor_species", "n")
+        assert spherical_expansion.property_names == ("species_neighbor", "n")
 
         n_species, n_pseudo_species = self.combining_matrix.shape
 
@@ -42,7 +41,7 @@ class CombineSpecies(torch.nn.Module):
             radial = np.unique(block.properties["n"])
             n_radial = len(radial)
             properties = Labels(
-                names=["neighbor_species", "n"],
+                names=["species_neighbor", "n"],
                 values=np.array(
                     [[-s, n] for s in range(n_pseudo_species) for n in radial],
                     dtype=np.int32,
