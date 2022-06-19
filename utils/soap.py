@@ -6,14 +6,15 @@ from equistore import Labels, TensorBlock, TensorMap
 
 class CompositionFeatures(torch.nn.Module):
     def __init__(self, 
-        all_species
+        all_species, device="cpu"               
     ):
         super().__init__()
         self.species_dict = {s:i for i,s in enumerate(all_species)}    
+        self.device = device
     
     def forward(self, frames) -> TensorMap:
         
-        data = torch.zeros(size=(len(frames), len(self.species_dict)))
+        data = torch.zeros(size=(len(frames), len(self.species_dict)), device=self.device)
         for i, f in enumerate(frames):
             for s in f.numbers:
                 data[i,self.species_dict[s]] += 1

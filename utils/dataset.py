@@ -7,8 +7,7 @@ from rascaline import SphericalExpansion
 
 
 def _block_to_torch(block, structure_i):
-    assert block.samples.names[0] == "structure"
-    print(block.samples.names)
+    assert block.samples.names[0] == "structure"    
     samples = block.samples.view(dtype=np.int32).reshape(-1, len(block.samples.names)).copy()
     samples[:, 0] = structure_i
     samples = Labels(block.samples.names, samples)
@@ -70,6 +69,7 @@ class AtomisticDataset(torch.utils.data.Dataset):
         energies,
         forces=None,
         radial_spectrum_n_max=None,
+        radial_spectrum_rcut=None,
     ):
         all_neighbor_species = Labels(
             names=["species_neighbor"],
@@ -86,6 +86,8 @@ class AtomisticDataset(torch.utils.data.Dataset):
             new_hypers = copy.deepcopy(hypers)
             new_hypers["max_angular"] = 0
             new_hypers["max_radial"] = radial_spectrum_n_max
+            if radial_spectrum_rcut is not None:
+                new_hypers["cutoff"] = radial_spectrum_rcut
             calculator = SphericalExpansion(**new_hypers)
 
             for frame_i, frame in enumerate(frames):
@@ -208,7 +210,6 @@ def _collate_tensor_map(tensors, device):
                 grad_data.append(gradient.data)
 
             previous_samples_count += new_samples.shape[0]
-
         new_block = TensorBlock(
             values=torch.vstack(values).to(device),
             samples=Labels(
@@ -247,12 +248,11 @@ def _collate_data(device):
         spherical_expansion = _collate_tensor_map([d[2] for d in data], device)
 
         energies = torch.vstack([d[3] for d in data]).to(device=device)
-
         if data[0][4] is not None:
             forces = torch.vstack([d[4] for d in data]).to(device=device)
         else:
             forces = None
-
+        
         return frames, radial_spectrum, spherical_expansion, energies, forces
 
     return do_collate

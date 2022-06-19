@@ -18,8 +18,10 @@ class LinearModel(torch.nn.Module):
         self.optimizable_weights = optimizable_weights
         self.random_initial_weights = random_initial_weights
 
-    def initialize_model_weights(self, descriptor, energies, forces=None):
+    def initialize_model_weights(self, descriptor, energies, forces=None, seed=None):
 
+        if seed is not None:
+            torch.manual_seed(seed)
         if self.random_initial_weights:
             X = descriptor.block().values
             weights = torch.rand((X.shape[1], 1), device=X.device)
