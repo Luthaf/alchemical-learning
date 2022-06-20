@@ -4,6 +4,8 @@ import numpy as np
 import torch
 from equistore import Labels, TensorBlock, TensorMap
 from rascaline import SphericalExpansion
+from .operations import SumStructures
+from  time import time
 
 
 def _block_to_torch(block, structure_i):
@@ -89,6 +91,7 @@ class AtomisticDataset(torch.utils.data.Dataset):
             if radial_spectrum_rcut is not None:
                 new_hypers["cutoff"] = radial_spectrum_rcut
             calculator = SphericalExpansion(**new_hypers)
+            summer = SumStructures()
 
             for frame_i, frame in enumerate(frames):
                 spherical_expansion = calculator.compute(frame)
@@ -98,9 +101,10 @@ class AtomisticDataset(torch.utils.data.Dataset):
                 spherical_expansion.components_to_properties("spherical_harmonics_m")
                 spherical_expansion.keys_to_properties("spherical_harmonics_l")
 
-                spherical_expansion.keys_to_properties(all_neighbor_species)
+                spherical_expansion.keys_to_properties(all_neighbor_species)                
+                #sph_structure = summer(spherical_expansion)
                 self.radial_spectrum.append(
-                    _move_to_torch(spherical_expansion, frame_i)
+                    summer(_move_to_torch(spherical_expansion, frame_i))
                 )
         else:
             self.radial_spectrum = [None] * len(frames)
@@ -153,23 +157,28 @@ class AtomisticDataset(torch.utils.data.Dataset):
                 assert f.shape == (len(self.frames[i]), 3)
 
         self.forces = forces
+        self._getitemtime = 0
+        self._collatetime = 0
 
     def __len__(self):
         return len(self.frames)
 
     def __getitem__(self, idx):
+        self._getitemtime -= time()
         if self.forces is None:
             forces = None
         else:
-            forces = self.forces[idx]
+            forces = self.forces[idx]        
 
-        return (
+        data = (
             self.frames[idx],
             self.radial_spectrum[idx],
             self.spherical_expansions[idx],
             self.energies[idx],
             forces,
         )
+        self._getitemtime += time()
+        return data
 
 
 def _collate_tensor_map(tensors, device):
@@ -235,8 +244,9 @@ def _collate_tensor_map(tensors, device):
     return TensorMap(keys, blocks)
 
 
-def _collate_data(device):
+def _collate_data(device, self):
     def do_collate(data):
+        start=time()
         frames = [d[0] for d in data]
 
         radial_spectrum = [d[1] for d in data]
@@ -252,7 +262,7 @@ def _collate_data(device):
             forces = torch.vstack([d[4] for d in data]).to(device=device)
         else:
             forces = None
-        
+        self._collatetime+=time()-start
         return frames, radial_spectrum, spherical_expansion, energies, forces
 
     return do_collate
@@ -263,5 +273,5 @@ def create_dataloader(dataset, batch_size, shuffle=True, device="cpu"):
         dataset,
         batch_size=batch_size,
         shuffle=shuffle,
-        collate_fn=_collate_data(device),
+        collate_fn=_collate_data(device, dataset),
     )
