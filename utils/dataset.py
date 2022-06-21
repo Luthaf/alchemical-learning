@@ -189,8 +189,10 @@ def _collate_tensor_map(tensors, device):
     keys = tensors[0].keys
 
     blocks = []
-    for key in keys:
-        first_block = tensors[0].block(key)
+    for key_i, key in enumerate(keys):
+        # this assumes that the keys are in the same order in all tensors (which
+        # should be fine in this project)
+        first_block = tensors[0].block(key_i)
         if first_block.has_gradient("positions"):
             first_block_grad = first_block.gradient("positions")
         else:
@@ -203,7 +205,7 @@ def _collate_tensor_map(tensors, device):
         grad_data = []
         previous_samples_count = 0
         for tensor in tensors:
-            block = tensor.block(key)
+            block = tensor.block(key_i)
 
             new_samples = block.samples.view(dtype=np.int32).reshape(
                 -1, len(block.samples.names)
