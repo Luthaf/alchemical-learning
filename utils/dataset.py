@@ -5,8 +5,8 @@ import torch
 from equistore import Labels, TensorBlock, TensorMap
 from rascaline import SphericalExpansion
 from .operations import SumStructures
-from  time import time
-
+from time import time
+from .soap import CompositionFeatures
 
 def _block_to_torch(block, structure_i):
     assert block.samples.names[0] == "structure"    
@@ -80,8 +80,8 @@ class AtomisticDataset(torch.utils.data.Dataset):
         all_center_species = Labels(
             names=["species_center"],
             values=np.array(all_species, dtype=np.int32).reshape(-1, 1),
-        )
-
+        )       
+            
         self.radial_spectrum = []
         hypers = copy.deepcopy(hypers)
         if radial_spectrum_n_max is not None:
@@ -144,8 +144,17 @@ class AtomisticDataset(torch.utils.data.Dataset):
                     _move_to_torch(spherical_expansion, frame_i)
                 )
 
-        self.frames = frames
-
+        self.composition = []
+        if all_species is not None:
+            comp_calc=CompositionFeatures(all_species)   
+            for frame_i, frame in enumerate(frames):
+                comp=comp_calc([frame], np.array([frame_i], dtype=np.int32).reshape(-1,1))
+                self.composition.append(
+                    comp
+                )
+        else:
+            self.composition = [None] * len(frames)                
+                
         assert isinstance(energies, torch.Tensor)
         assert energies.shape == (len(frames), 1)
         self.energies = energies
@@ -161,7 +170,7 @@ class AtomisticDataset(torch.utils.data.Dataset):
         self._collatetime = 0
 
     def __len__(self):
-        return len(self.frames)
+        return len(self.composition)
 
     def __getitem__(self, idx):
         self._getitemtime -= time()
@@ -171,7 +180,7 @@ class AtomisticDataset(torch.utils.data.Dataset):
             forces = self.forces[idx]        
 
         data = (
-            self.frames[idx],
+            self.composition[idx],
             self.radial_spectrum[idx],
             self.spherical_expansions[idx],
             self.energies[idx],
@@ -247,7 +256,11 @@ def _collate_tensor_map(tensors, device):
 def _collate_data(device, self):
     def do_collate(data):
         start=time()
-        frames = [d[0] for d in data]
+        composition = [d[0] for d in data]
+        if composition[0] is None:
+            composition = None
+        else:
+            composition = _collate_tensor_map(composition, device)
 
         radial_spectrum = [d[1] for d in data]
         if radial_spectrum[0] is None:
@@ -263,7 +276,7 @@ def _collate_data(device, self):
         else:
             forces = None
         self._collatetime+=time()-start
-        return frames, radial_spectrum, spherical_expansion, energies, forces
+        return composition, radial_spectrum, spherical_expansion, energies, forces
 
     return do_collate
 
