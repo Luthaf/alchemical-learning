@@ -1,16 +1,20 @@
 import copy
+from time import time
 
 import numpy as np
 import torch
 from equistore import Labels, TensorBlock, TensorMap
 from rascaline import SphericalExpansion
+
 from .operations import SumStructures
 from time import time
 from .soap import CompositionFeatures
 
 def _block_to_torch(block, structure_i):
-    assert block.samples.names[0] == "structure"    
-    samples = block.samples.view(dtype=np.int32).reshape(-1, len(block.samples.names)).copy()
+    assert block.samples.names[0] == "structure"
+    samples = (
+        block.samples.view(dtype=np.int32).reshape(-1, len(block.samples.names)).copy()
+    )
     samples[:, 0] = structure_i
     samples = Labels(block.samples.names, samples)
 
@@ -26,7 +30,11 @@ def _block_to_torch(block, structure_i):
 
         assert gradient.samples.names == ("sample", "structure", "atom")
 
-        gradient_samples = gradient.samples.view(dtype=np.int32).reshape(-1, len(gradient.samples.names)).copy()
+        gradient_samples = (
+            gradient.samples.view(dtype=np.int32)
+            .reshape(-1, len(gradient.samples.names))
+            .copy()
+        )
         gradient_samples[:, 1] = structure_i
         gradient_samples = Labels(gradient.samples.names, gradient_samples)
 
@@ -70,8 +78,6 @@ class AtomisticDataset(torch.utils.data.Dataset):
         hypers,
         energies,
         forces=None,
-        radial_spectrum_n_max=None,
-        radial_spectrum_rcut=None,
     ):
         all_neighbor_species = Labels(
             names=["species_neighbor"],
@@ -83,15 +89,11 @@ class AtomisticDataset(torch.utils.data.Dataset):
         )       
             
         self.radial_spectrum = []
-        hypers = copy.deepcopy(hypers)
-        if radial_spectrum_n_max is not None:
-            new_hypers = copy.deepcopy(hypers)
-            new_hypers["max_angular"] = 0
-            new_hypers["max_radial"] = radial_spectrum_n_max
-            if radial_spectrum_rcut is not None:
-                new_hypers["cutoff"] = radial_spectrum_rcut
-            calculator = SphericalExpansion(**new_hypers)
-            summer = SumStructures()
+        hypers_radial_spectrum = copy.deepcopy(hypers.get("radial_spectrum", None))
+        if hypers_radial_spectrum is not None:
+            hypers_radial_spectrum["max_angular"] = 0
+            calculator = SphericalExpansion(**hypers_radial_spectrum)
+            sum_structures = SumStructures()
 
             for frame_i, frame in enumerate(frames):
                 spherical_expansion = calculator.compute(frame)
@@ -101,21 +103,24 @@ class AtomisticDataset(torch.utils.data.Dataset):
                 spherical_expansion.components_to_properties("spherical_harmonics_m")
                 spherical_expansion.keys_to_properties("spherical_harmonics_l")
 
-                spherical_expansion.keys_to_properties(all_neighbor_species)                
-                #sph_structure = summer(spherical_expansion)
+                spherical_expansion.keys_to_properties(all_neighbor_species)
+                # sph_structure = summer(spherical_expansion)
                 self.radial_spectrum.append(
-                    summer(_move_to_torch(spherical_expansion, frame_i))
+                    sum_structures(_move_to_torch(spherical_expansion, frame_i))
                 )
         else:
             self.radial_spectrum = [None] * len(frames)
 
         self.spherical_expansions = []
-        if "radial_per_angular" in hypers:
-            radial_per_angular = hypers.pop("radial_per_angular")
+        hypers_spherical_expansion = copy.deepcopy(
+            hypers.get("spherical_expansion", None)
+        )
+        if "radial_per_angular" in hypers_spherical_expansion:
+            radial_per_angular = hypers_spherical_expansion.pop("radial_per_angular")
 
             calculators = {}
             for l, n in radial_per_angular.items():
-                new_hypers = copy.deepcopy(hypers)
+                new_hypers = copy.deepcopy(hypers_spherical_expansion)
                 new_hypers["max_angular"] = l
                 new_hypers["max_radial"] = n
                 calculators[l] = SphericalExpansion(**new_hypers)
@@ -133,7 +138,7 @@ class AtomisticDataset(torch.utils.data.Dataset):
                 )
 
         else:
-            calculator = SphericalExpansion(**hypers)
+            calculator = SphericalExpansion(**hypers_spherical_expansion)
 
             for frame_i, frame in enumerate(frames):
                 spherical_expansion = calculator.compute(frame)
@@ -173,11 +178,11 @@ class AtomisticDataset(torch.utils.data.Dataset):
         return len(self.composition)
 
     def __getitem__(self, idx):
-        self._getitemtime -= time()
+        start = time()
         if self.forces is None:
             forces = None
         else:
-            forces = self.forces[idx]        
+            forces = self.forces[idx]
 
         data = (
             self.composition[idx],
@@ -186,7 +191,7 @@ class AtomisticDataset(torch.utils.data.Dataset):
             self.energies[idx],
             forces,
         )
-        self._getitemtime += time()
+        self._getitemtime += time() - start
         return data
 
 
@@ -194,8 +199,10 @@ def _collate_tensor_map(tensors, device):
     keys = tensors[0].keys
 
     blocks = []
-    for key in keys:
-        first_block = tensors[0].block(key)
+    for key_i, key in enumerate(keys):
+        # this assumes that the keys are in the same order in all tensors (which
+        # should be fine in this project)
+        first_block = tensors[0].block(key_i)
         if first_block.has_gradient("positions"):
             first_block_grad = first_block.gradient("positions")
         else:
@@ -208,7 +215,7 @@ def _collate_tensor_map(tensors, device):
         grad_data = []
         previous_samples_count = 0
         for tensor in tensors:
-            block = tensor.block(key)
+            block = tensor.block(key_i)
 
             new_samples = block.samples.view(dtype=np.int32).reshape(
                 -1, len(block.samples.names)
@@ -253,7 +260,7 @@ def _collate_tensor_map(tensors, device):
     return TensorMap(keys, blocks)
 
 
-def _collate_data(device, self):
+def _collate_data(device, dataset):
     def do_collate(data):
         start=time()
         composition = [d[0] for d in data]
