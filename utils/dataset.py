@@ -168,7 +168,7 @@ class AtomisticDataset(torch.utils.data.Dataset):
             assert isinstance(forces, list)
             for i, f in enumerate(forces):
                 assert isinstance(f, torch.Tensor)
-                assert f.shape == (len(self.frames[i]), 3)
+                assert f.shape == (len(frames[i]), 3)
 
         self.forces = forces
         self._getitemtime = 0
@@ -282,7 +282,7 @@ def _collate_data(device, dataset):
             forces = torch.vstack([d[4] for d in data]).to(device=device)
         else:
             forces = None
-        self._collatetime+=time()-start
+        dataset._collatetime+=time()-start
         return composition, radial_spectrum, spherical_expansion, energies, forces
 
     return do_collate
