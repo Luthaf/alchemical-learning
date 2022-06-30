@@ -123,6 +123,8 @@ class PowerSpectrum(torch.nn.Module):
         for (l,), spx_1 in spherical_expansion:
             nsoap += len(spx_1.properties)**2
         datafull = torch.zeros((len(spx_1.samples), nsoap), device = spx_1.values.device)
+        if spx_1.has_gradient("positions"):
+            datafull_grad = torch.zeros((len(spx_1.gradient("positions").samples), 3, nsoap), device = spx_1.values.device)
         nsoap = 0 # resets counter
         pnames = ( [f"{name}_1" for name in spx_1.properties.names]
                 + [f"{name}_2" for name in spx_1.properties.names] + ["spherical_harmonics_l"] )
@@ -141,14 +143,11 @@ class PowerSpectrum(torch.nn.Module):
                     ])
             
             # Compute the invariants by summation and store the results
-            datafull[:, nsoap:nsoap+len(pvalues[-1])]= factor * torch.einsum("ima, imb -> iab", spx_1.values, spx_2.values).reshape(datafull.shape[0], -1)
-            nsoap += len(pvalues[-1])
+            datafull[:, nsoap:nsoap+len(pvalues[-1])] = factor * torch.einsum("ima, imb -> iab", spx_1.values, spx_2.values).reshape(datafull.shape[0], -1)            
 
-
-            if spx_1.has_gradient("positions"):
-                raise ValueError("one-shot powerspectrum gradient not implemented yet")
+            if spx_1.has_gradient("positions"):                
                 gradient_1 = spx_1.gradient("positions")
-                gradient_2 = spx_2.gradient("positions")
+                gradient_2 = spx_2.gradient("positions")                                
 
                 if len(gradient_1.samples) == 0 or len(gradient_2.samples) == 0:
                     continue
@@ -157,33 +156,37 @@ class PowerSpectrum(torch.nn.Module):
                 assert np.all(gradient_1.samples == gradient_2.samples)
                 gradients_samples = gradient_1.samples
 
-                gradient_data = factor * torch.einsum(
+                datafull_grad[:, :, nsoap:nsoap+len(pvalues[-1])]  = factor * torch.einsum(
                     "ixma, imb -> ixab",
                     gradient_1.data,
                     spx_2.values[gradient_1.samples["sample"].tolist(), :, :],
                 ).reshape(gradients_samples.shape[0], 3, -1)
 
-                gradient_data += factor * torch.einsum(
+                datafull_grad[:, :, nsoap:nsoap+len(pvalues[-1])] += factor * torch.einsum(
                     "ima, ixmb -> ixab",
                     spx_1.values[gradient_2.samples["sample"].tolist(), :, :],
                     gradient_2.data,
                 ).reshape(gradients_samples.shape[0], 3, -1)
 
                 assert gradient_1.components[0].names == ("gradient_direction",)
-                block.add_gradient(
+            
+            nsoap += len(pvalues[-1])
+        
+        block = TensorBlock(
+                           values = datafull,
+                           samples = spx_1.samples,
+                           components = [],
+                           properties = Labels(names=pnames,
+                                               values = np.asarray(np.vstack(pvalues), dtype=np.int32) )
+                       )
+        if spx_1.has_gradient("positions"):
+            block.add_gradient(
                     "positions",
-                    gradient_data,
+                    datafull_grad,
                     gradients_samples,
                     [gradient_1.components[0]],
                 )
-        
         descriptor = TensorMap(Labels.single(), 
-                               [TensorBlock(
-                                   values = datafull,
-                                   samples = spx_1.samples,
-                                   components = [],
-                                   properties = Labels(names=pnames,
-                                                       values = np.asarray(np.vstack(pvalues), dtype=np.int32) )
-                               )]
+                               [block]
                               )
         return descriptor
