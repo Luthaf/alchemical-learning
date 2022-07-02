@@ -57,81 +57,66 @@ class SumStructuresAutograd(torch.autograd.Function):
         gradient_data: Optional[torch.Tensor],
         gradient_samples: Optional[Labels],
     ):
+    
         # get the unique entries in samples["structure"] without
         # sorting the result (that would break pytorch dataloader shuffling)
-        unique_structures_idx = np.unique(samples["structure"], return_index=True)[1]
-        new_samples = samples["structure"][np.sort(unique_structures_idx)]
+        samples_structure = samples["structure"]
+        unique_structures, unique_structures_idx = np.unique(samples_structure, return_index=True)        
+        new_samples = samples_structure[np.sort(unique_structures_idx)]       
+        # we need a list keeping track of where each atomic contribution goes 
+        # (e.g. if structure ids are [3,3,3,1,1,1,6,6,6] that will be stored as 
+        # the unique structures [3, 1, 6], structure_map will be 
+        # [0,0,0,1,1,1,2,2,2]
+        replace_rule = dict(zip(unique_structures, range(len(unique_structures))))
+        structure_map = torch.tensor([replace_rule[i] for i in samples_structure], dtype = torch.long)        
 
         new_values = torch.zeros(
             (len(new_samples), *values.shape[1:]),
             device=values.device,
         )
-
+        new_values.index_add_(0, structure_map, values)
+        
         if gradient_data is not None:
             assert gradient_samples is not None
             do_gradients = True
 
-            cumulative_atoms_per_frame = [0]
-            for structure_i, structure in enumerate(new_samples):
-                mask = gradient_samples["structure"] == structure
-                atoms = np.unique(gradient_samples[mask]["atom"])
-
-                cumulative_atoms = len(atoms) + cumulative_atoms_per_frame[-1]
-                cumulative_atoms_per_frame.append(cumulative_atoms)
-
+            # here we need to get unique _gradient_ elements, so [A,j] pairs. The i-atom index is summed over
+            # and we don't need to know it explicitly. We convert Labels slices to tuples so we can hash them to make a dict            
+            gradient_samples_Aj = np.asarray(gradient_samples[["structure", "atom"]], dtype=tuple) 
+            unique_gradient, unique_gradient_idx = np.unique(gradient_samples_Aj, return_index=True)        
+            new_gradient_samples = gradient_samples_Aj[np.sort(unique_gradient_idx)]
+            # the logic is analogous to that for the structures: we have to map positions in the full (A,i,j) vector to the
+            # position where they will have to be accumulated
+            gradient_replace_rule = dict(zip(unique_gradient, range(len(unique_gradient))))
+            gradient_map = torch.tensor([gradient_replace_rule[i] for i in gradient_samples_Aj], dtype = torch.long)
+            
             new_gradient_data = torch.zeros(
-                (cumulative_atoms_per_frame[-1], *gradient_data.shape[1:]),
+                (len(unique_gradient), *gradient_data.shape[1:]),
                 device=gradient_data.device,
             )
-
-            new_gradient_samples = []
-            grad_samples_mapping = [[] for _ in range(new_gradient_data.shape[0])]
+            # ... and then contracting the gradients is just one call
+            new_gradient_data.index_add_(0, gradient_map, gradient_data)
+            
+            # builds gradient labels
+            ug_array = np.vstack(unique_gradient)
+            new_gradient_samples = Labels(
+                names=["sample", "structure", "atom"],
+                values=np.asarray(np.hstack([np.asarray([replace_rule[i] for i in ug_array[:,0]]).reshape(-1,1),
+                 ug_array]), dtype=np.int32))
+            ctx.gradient_map = gradient_map            
         else:
             do_gradients = False
             new_gradient_data = None
             new_gradient_samples = None
-            grad_samples_mapping = None
-
-        structures_masks = []
-        for structure_i, structure in enumerate(new_samples):
-            mask = samples["structure"] == structure
-            structures_masks.append(mask)
-            new_values[structure_i, ...] = values[mask, ...].sum(dim=0, keepdim=True)
-
-            if do_gradients:
-                mask = gradient_samples["structure"] == structure
-                atoms = np.unique(gradient_samples[mask]["atom"])
-
-                new_gradient_samples.append(
-                    np.array(
-                        [[structure_i, structure, atom] for atom in atoms],
-                        dtype=np.int32,
-                    )
-                )
-
-                atom_index_positions = {atom: i for i, atom in enumerate(atoms)}
-
-                for sample_i in np.where(gradient_samples["structure"] == structure)[0]:
-                    grad_sample = gradient_samples[sample_i]
-
-                    atom_i = atom_index_positions[grad_sample["atom"]]
-                    grad_sample_i = cumulative_atoms_per_frame[structure_i] + atom_i
-                    new_gradient_data[grad_sample_i] += gradient_data[sample_i]
-                    grad_samples_mapping[grad_sample_i].append(sample_i)
-
-        if do_gradients:
-            new_gradient_samples = Labels(
-                names=["sample", "structure", "atom"],
-                values=np.concatenate(new_gradient_samples),
-            )
-
-        ctx.structures_masks = structures_masks
-        ctx.grad_samples_mapping = grad_samples_mapping
+            grad_samples_mapping = None        
+            
+        ctx.structure_map = structure_map
         ctx.save_for_backward(values, gradient_data)
 
         return new_values, new_samples, new_gradient_data, new_gradient_samples
 
-    @staticmethod
+    @staticmethod 
+    @profile
     def backward(
         ctx,
         grad_new_values,
@@ -144,14 +129,10 @@ class SumStructuresAutograd(torch.autograd.Function):
         values, gradient_data = ctx.saved_tensors
 
         if values.requires_grad:
-            grad_values = torch.zeros_like(values)
-            for structure_i, mask in enumerate(ctx.structures_masks):
-                grad_values[mask, ...] = grad_new_values[structure_i, ...]
-
+            grad_values = grad_new_values[ctx.structure_map, ...]
+            
         if gradient_data is not None and gradient_data.requires_grad:
-            grad_gradient_data = torch.zeros_like(gradient_data)
-            for sample_i, mask in enumerate(ctx.grad_samples_mapping):
-                grad_gradient_data[mask, ...] = grad_new_gradient_data[sample_i, ...]
+            grad_gradient_data = grad_new_gradient_data[ctx.gradient_map]        
 
         return grad_values, None, grad_gradient_data, None
 
