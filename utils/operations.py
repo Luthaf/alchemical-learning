@@ -116,7 +116,6 @@ class SumStructuresAutograd(torch.autograd.Function):
         return new_values, new_samples, new_gradient_data, new_gradient_samples
 
     @staticmethod 
-    @profile
     def backward(
         ctx,
         grad_new_values,

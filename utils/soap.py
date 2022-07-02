@@ -122,9 +122,10 @@ class PowerSpectrum(torch.nn.Module):
         nsoap = 0
         for (l,), spx_1 in spherical_expansion:
             nsoap += len(spx_1.properties)**2
-        datafull = torch.zeros((len(spx_1.samples), nsoap), device = spx_1.values.device)
+        datafull = torch.empty((len(spx_1.samples), nsoap), device = spx_1.values.device)
+
         if spx_1.has_gradient("positions"):
-            datafull_grad = torch.zeros((len(spx_1.gradient("positions").samples), 3, nsoap), device = spx_1.values.device)
+            datafull_grad = torch.empty((len(spx_1.gradient("positions").samples), 3, nsoap), device = spx_1.values.device)
         nsoap = 0 # resets counter
         pnames = ( [f"{name}_1" for name in spx_1.properties.names]
                 + [f"{name}_2" for name in spx_1.properties.names] + ["spherical_harmonics_l"] )
@@ -143,7 +144,8 @@ class PowerSpectrum(torch.nn.Module):
                     ])
             
             # Compute the invariants by summation and store the results
-            datafull[:, nsoap:nsoap+len(pvalues[-1])] = factor * torch.einsum("ima, imb -> iab", spx_1.values, spx_2.values).reshape(datafull.shape[0], -1)            
+            
+            datafull[:, nsoap:nsoap+len(pvalues[-1])] = torch.einsum("ima, imb -> iab", factor*spx_1.values, spx_2.values).reshape(datafull.shape[0], -1)            
 
             if spx_1.has_gradient("positions"):                
                 gradient_1 = spx_1.gradient("positions")
@@ -156,15 +158,15 @@ class PowerSpectrum(torch.nn.Module):
                 assert np.all(gradient_1.samples == gradient_2.samples)
                 gradients_samples = gradient_1.samples
 
-                datafull_grad[:, :, nsoap:nsoap+len(pvalues[-1])]  = factor * torch.einsum(
+                datafull_grad[:, :, nsoap:nsoap+len(pvalues[-1])]  = torch.einsum(
                     "ixma, imb -> ixab",
                     gradient_1.data,
-                    spx_2.values[gradient_1.samples["sample"].tolist(), :, :],
+                    factor * spx_2.values[gradient_1.samples["sample"].tolist(), :, :],
                 ).reshape(gradients_samples.shape[0], 3, -1)
 
-                datafull_grad[:, :, nsoap:nsoap+len(pvalues[-1])] += factor * torch.einsum(
+                datafull_grad[:, :, nsoap:nsoap+len(pvalues[-1])] += torch.einsum(
                     "ima, ixmb -> ixab",
-                    spx_1.values[gradient_2.samples["sample"].tolist(), :, :],
+                    factor*spx_1.values[gradient_2.samples["sample"].tolist(), :, :],
                     gradient_2.data,
                 ).reshape(gradients_samples.shape[0], 3, -1)
 
