@@ -68,7 +68,7 @@ class SumStructuresAutograd(torch.autograd.Function):
         # the unique structures [3, 1, 6], structure_map will be 
         # [0,0,0,1,1,1,2,2,2]
         replace_rule = dict(zip(unique_structures, range(len(unique_structures))))
-        structure_map = torch.tensor([replace_rule[i] for i in samples_structure], dtype = torch.long)        
+        structure_map = torch.tensor([replace_rule[i] for i in samples_structure], dtype = torch.long, device=values.device)       
 
         new_values = torch.zeros(
             (len(new_samples), *values.shape[1:]),
@@ -88,7 +88,7 @@ class SumStructuresAutograd(torch.autograd.Function):
             # the logic is analogous to that for the structures: we have to map positions in the full (A,i,j) vector to the
             # position where they will have to be accumulated
             gradient_replace_rule = dict(zip(unique_gradient, range(len(unique_gradient))))
-            gradient_map = torch.tensor([gradient_replace_rule[i] for i in gradient_samples_Aj], dtype = torch.long)
+            gradient_map = torch.tensor([gradient_replace_rule[i] for i in gradient_samples_Aj], dtype = torch.long, device=gradient_data.device)
             
             new_gradient_data = torch.zeros(
                 (len(unique_gradient), *gradient_data.shape[1:]),
