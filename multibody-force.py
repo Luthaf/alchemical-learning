@@ -431,47 +431,12 @@ torch.save(model.state_dict(), f"{filename}-init.torch")
 assert model.optimizable_weights
 himem = True
 if himem and len(all_losses)==0:
-    composition, radial_spectrum, spherical_expansions, energies, forces = next(iter(train_dataloader_grad_no_batch))
+    composition, radial_spectrum, spherical_expansions, energies, forces = next(iter(train_dataloader_no_batch))
+    f_composition, f_radial_spectrum, f_spherical_expansions, f_energies, f_forces = next(iter(train_forces_dataloader_grad_no_batch))
 
-for epoch in range(300):
+for epoch in range(10):
     epoch_start = time.time()
 
-    def single_step():
-        global composition, radial_spectrum, spherical_expansions, energies, forces
-        optimizer.zero_grad()
-        if device=="cuda":
-            print(f"mem. before:  {torch.cuda.memory_stats()['allocated_bytes.all.current']/1e6} MB allocated, {torch.cuda.memory_stats()['reserved_bytes.all.current']/1e6} MB reserved ")
-        loss = torch.zeros(size=(1,), device=device)
-        if himem:
-            predicted, predicted_forces = model(composition, radial_spectrum, spherical_expansions, forward_forces=do_gradients)
-            loss += loss_mse(predicted, energies)
-            loss += loss_mse(predicted_forces, forces)/42 
-        else:
-            for composition, radial_spectrum, spherical_expansions, energies, forces in train_dataloader_grad:
-                try:
-                    predicted, _ = model(composition, radial_spectrum, spherical_expansions, forward_forces=True)
-                except:
-                    if device=="cuda":
-                        print(f"mem. during:  {torch.cuda.memory_stats()['allocated_bytes.all.current']/1e6} MB allocated, {torch.cuda.memory_stats()['reserved_bytes.all.current']/1e6} MB reserved ")
-                    raise
-                loss += loss_mse(predicted, energies)
-        loss /= n_train
-        if model.composition_model is not None:
-            loss += TORCH_REGULARIZER_COMPOSITION * torch.linalg.norm(model.composition_model.weights)
-        if model.radial_spectrum_model is not None:
-            loss += TORCH_REGULARIZER_RADIAL_SPECTRUM * torch.linalg.norm(model.radial_spectrum_model.weights)
-        if model.power_spectrum_model is not None:
-            loss += TORCH_REGULARIZER_POWER_SPECTRUM * torch.linalg.norm(model.power_spectrum_model.weights)
-
-        loss.backward(retain_graph=False)
-        print(loss.item(), torch.linalg.norm(model.composition_model.weights.grad).item())
-        return loss
-            
-    loss = optimizer.step(single_step)
-    loss = loss.item()
-    all_losses.append(loss)
-
-    epoch_time = time.time() - epoch_start
     def single_step():
         global composition, radial_spectrum, spherical_expansions, energies
         optimizer.zero_grad()
