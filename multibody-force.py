@@ -518,8 +518,6 @@ for epoch in range(10):
         f_all_tests.append(f_test_mae.item())
         print(f"epoch {n_epochs_total} took {epoch_time:.4}s, optimizer loss={loss:.4}, test mae={test_mae:.4}"+
               (f" test mae force={f_test_mae:.4}"))
-        all_tests.append(test_mae.item())
-        print(f"epoch {n_epochs_total} took {epoch_time:.4}s, optimizer loss={loss:.4}, test mae={test_mae:.4}, test force mae={test_f_mae:.4} ")
         np.savetxt(f"{filename}-energy_test.dat",np.hstack([reference.cpu().numpy(), predicted.cpu().numpy()]))
         np.savetxt(f"{filename}-force_test.dat",np.hstack([f_reference.cpu().numpy(), f_predicted.cpu().numpy()]))
     del loss
