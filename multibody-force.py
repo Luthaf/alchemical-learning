@@ -415,7 +415,7 @@ all_losses = []
 all_tests=[]
 f_all_tests=[]
 
-filename = f"{prefix}-{model.__class__.__name__}-{N_PSEUDO_SPECIES}-mixed-{n_train}-train-{n_train_forces}-f"
+filename = f"{prefix}-{model.__class__.__name__}-{N_PSEUDO_SPECIES}-mixed-{n_train}-f{n_train_forces}-train"
 if model.optimizable_weights:
     filename += "-opt-weights"
 
