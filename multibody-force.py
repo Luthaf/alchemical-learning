@@ -19,8 +19,7 @@ from utils.soap import PowerSpectrum, CompositionFeatures
 torch.set_default_dtype(torch.float64)
 
 n_test = 1000
-n_train = 15002
-prefix = "sigma0.3"
+n_train = 5003
 
 frames = ase.io.read("data/data_shuffle.xyz", f":{n_test + n_train}")
 
@@ -69,9 +68,9 @@ all_species = list(map(lambda u: int(u), all_species))
 
 HYPERS_SMALL = {
     "cutoff": 4.0,
-    "max_angular": 4,
-    "max_radial": 6,
-    "atomic_gaussian_width": 0.3,
+    "max_angular": 3,
+    "max_radial": 5,
+    "atomic_gaussian_width": 0.4,
     "cutoff_function": {"ShiftedCosine": {"width": 0.5}},
     "radial_basis": {"SplinedGto": {"accuracy": 1e-6}},
     "gradients": False,
@@ -92,7 +91,7 @@ HYPERS_RADIAL = {
     "cutoff": 6.0,
     "max_angular": 0,
     "max_radial": 12,
-    "atomic_gaussian_width": 0.3,
+    "atomic_gaussian_width": 0.4,
     "cutoff_function": {"ShiftedCosine": {"width": 0.5}},
     "radial_basis": {"SplinedGto": {"accuracy": 1e-6}},
     "gradients": False,
@@ -100,7 +99,6 @@ HYPERS_RADIAL = {
     "radial_scaling":  {"Willatt2018": { "scale": 2.5, "rate": 0.8, "exponent": 2}}
 }
 
-np.save(f"{prefix}-hypers.npy",dict(powerspectrum=HYPERS_SMALL, radialspectrum=HYPERS_RADIAL))
 
 device = "cpu"
 
@@ -113,7 +111,7 @@ train_dataset = AtomisticDataset(train_frames, all_species,
 test_dataset = AtomisticDataset(test_frames, all_species, 
                                 {"radial_spectrum": HYPERS_RADIAL, "spherical_expansion":HYPERS_SMALL}, test_energies)
 
-do_gradients = False
+do_gradients = True
 if do_gradients is True:
     HYPERS_GRAD = copy.deepcopy(HYPERS_SMALL)
     HYPERS_GRAD["gradients"] = do_gradients
@@ -393,7 +391,7 @@ optimizer = torch.optim.LBFGS(model.parameters(), lr=lr)#, line_search_fn="stron
 all_losses = []
 all_tests=[]
 
-filename = f"{prefix}-{model.__class__.__name__}-{N_PSEUDO_SPECIES}-mixed-{n_train}-train"
+filename = f"{model.__class__.__name__}-{N_PSEUDO_SPECIES}-mixed-{n_train}-train"
 if model.optimizable_weights:
     filename += "-opt-weights"
 
@@ -421,12 +419,13 @@ for epoch in range(300):
             print(f"mem. before:  {torch.cuda.memory_stats()['allocated_bytes.all.current']/1e6} MB allocated, {torch.cuda.memory_stats()['reserved_bytes.all.current']/1e6} MB reserved ")
         loss = torch.zeros(size=(1,), device=device)
         if himem:
-            predicted, _ = model(composition, radial_spectrum, spherical_expansions, forward_forces=False)
+            predicted, predicted_forces = model(composition, radial_spectrum, spherical_expansions, forward_forces=do_gradients)
             loss += loss_mse(predicted, energies)
+            loss += loss_mse(predicted_forces, forces)/42 
         else:
-            for composition, radial_spectrum, spherical_expansions, energies, forces in train_dataloader:
+            for composition, radial_spectrum, spherical_expansions, energies, forces in train_dataloader_grad:
                 try:
-                    predicted, _ = model(composition, radial_spectrum, spherical_expansions, forward_forces=False)
+                    predicted, _ = model(composition, radial_spectrum, spherical_expansions, forward_forces=True)
                 except:
                     if device=="cuda":
                         print(f"mem. during:  {torch.cuda.memory_stats()['allocated_bytes.all.current']/1e6} MB allocated, {torch.cuda.memory_stats()['reserved_bytes.all.current']/1e6} MB reserved ")
@@ -462,19 +461,27 @@ for epoch in range(300):
         with torch.no_grad():
             predicted = []
             reference = []
-            for tcomposition, tradial_spectrum, tspherical_expansions, tenergies, tforces in test_dataloader:
+            f_reference = []
+            f_predicted = []
+            for tcomposition, tradial_spectrum, tspherical_expansions, tenergies, tforces in test_dataloader_grad:
                 reference.append(tenergies)
-                predicted_e, _ = model(tcomposition, tradial_spectrum, tspherical_expansions, forward_forces=False)
+                f_reference.append(tforces)
+                predicted_e, predicted_f = model(tcomposition, tradial_spectrum, tspherical_expansions, forward_forces=True)
                 predicted.append(predicted_e)
+                f_predicted.append(predicted_f)
                 
             reference = torch.vstack(reference)
             predicted = torch.vstack(predicted)
+            f_reference = torch.vstack(f_reference)
+            f_predicted = torch.vstack(f_predicted)
+
             test_mae = loss_mae(predicted, reference)/n_test
+            test_f_mae = loss_mae(f_predicted, f_reference)/n_test/42
 
             output.write(f"{n_epochs_total} {loss} {test_mae}\n")
             output.flush()
         all_tests.append(test_mae.item())
-        print(f"epoch {n_epochs_total} took {epoch_time:.4}s, optimizer loss={loss:.4}, test mae={test_mae:.4}")
+        print(f"epoch {n_epochs_total} took {epoch_time:.4}s, optimizer loss={loss:.4}, test mae={test_mae:.4}, test force mae={test_f_mae:.4} ")
     del loss
     n_epochs_total += 1
     
