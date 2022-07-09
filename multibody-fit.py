@@ -20,7 +20,7 @@ torch.set_default_dtype(torch.float64)
 
 n_test = 1000
 n_train = 15002
-prefix = "sigma0.3"
+prefix = "sigma0.25"
 
 frames = ase.io.read("data/data_shuffle.xyz", f":{n_test + n_train}")
 

@@ -18,10 +18,11 @@ from utils.soap import PowerSpectrum, CompositionFeatures
 
 torch.set_default_dtype(torch.float64)
 
-n_test = 10
-n_train = 80
-n_train_forces = 20
-prefix = "sigma0.25"
+n_epochs = 200
+n_test = 500
+n_train = 13000
+n_train_forces = 2000
+prefix = "sigma0.25-0.35"
 
 frames = ase.io.read("data/data_shuffle.xyz", f":{n_test + n_train + n_train_forces}")
 
@@ -75,10 +76,10 @@ all_species = list(map(lambda u: int(u), all_species))
 # }
 
 HYPERS_SMALL = {
-    "cutoff": 4.0,
+    "cutoff": 4.5,
     "max_angular": 3,
-    "max_radial": 5,
-    "atomic_gaussian_width": 0.3,
+    "max_radial": 6, 
+    "atomic_gaussian_width": 0.35,
     "cutoff_function": {"ShiftedCosine": {"width": 0.5}},
     "radial_basis": {"SplinedGto": {"accuracy": 1e-6}},
     "gradients": False,
@@ -99,7 +100,7 @@ HYPERS_RADIAL = {
     "cutoff": 6.0,
     "max_angular": 0,
     "max_radial": 12,
-    "atomic_gaussian_width": 0.3,
+    "atomic_gaussian_width": 0.25,
     "cutoff_function": {"ShiftedCosine": {"width": 0.5}},
     "radial_basis": {"SplinedGto": {"accuracy": 1e-6}},
     "gradients": False,
@@ -112,15 +113,17 @@ device = "cpu"
 
 #if torch.cuda.is_available():
 #    device = "cuda"
-
+print("Computing representations")
 train_dataset = AtomisticDataset(train_frames, all_species, 
                                  {"radial_spectrum": HYPERS_RADIAL, "spherical_expansion":HYPERS_SMALL}, train_energies)
 train_forces_dataset = AtomisticDataset(train_forces_frames, all_species, 
                                  {"radial_spectrum": HYPERS_RADIAL, "spherical_expansion":HYPERS_SMALL}, train_forces_e)
 test_dataset = AtomisticDataset(test_frames, all_species, 
                                 {"radial_spectrum": HYPERS_RADIAL, "spherical_expansion":HYPERS_SMALL}, test_energies)                                
+
 do_gradients = True
 if do_gradients is True:
+    print("Computing data with gradients")
     HYPERS_GRAD = copy.deepcopy(HYPERS_SMALL)
     HYPERS_GRAD["gradients"] = do_gradients
     HYPERS_RAD_GRAD = copy.deepcopy(HYPERS_RADIAL)
@@ -134,7 +137,8 @@ if do_gradients is True:
 else:
     train_forces_dataset_grad = train_forces_dataset
     test_dataset_grad = test_dataset
-    
+
+print("Creating data loaders")
 train_dataloader = create_dataloader(
     train_dataset,
     batch_size=200,
@@ -158,7 +162,7 @@ train_dataloader_no_batch = create_dataloader(
 
 train_forces_dataloader_no_batch = create_dataloader(
     train_forces_dataset,
-    batch_size=len(train_dataset),
+    batch_size=len(train_forces_dataset),
     shuffle=False,
     device=device,
 )
@@ -188,7 +192,7 @@ if do_gradients is True:
     train_forces_dataloader_grad_single_frame = create_dataloader(
         train_forces_dataset_grad,
         batch_size=1,
-        shuffle=True,
+        shuffle=False,
         device=device,
     )
     
@@ -396,7 +400,7 @@ if model.random_initial_weights:
 else:
     dataloader_initialization = train_dataloader_no_batch
     
-    
+print("Initializing model")    
 # initialize the model
 with torch.no_grad():
     for composition, radial_spectrum, spherical_expansions, energies, forces in dataloader_initialization:
@@ -432,9 +436,12 @@ assert model.optimizable_weights
 himem = True
 if himem and len(all_losses)==0:
     composition, radial_spectrum, spherical_expansions, energies, forces = next(iter(train_dataloader_no_batch))
+    del train_dataset
     f_composition, f_radial_spectrum, f_spherical_expansions, f_energies, f_forces = next(iter(train_forces_dataloader_grad_no_batch))
+    del train_forces_dataset
 
-for epoch in range(10):
+for epoch in range(n_epochs):
+    print("Beginning epoch", epoch)
     epoch_start = time.time()
 
     def single_step():
@@ -519,7 +526,7 @@ for epoch in range(10):
         print(f"epoch {n_epochs_total} took {epoch_time:.4}s, optimizer loss={loss:.4}, test mae={test_mae:.4}"+
               (f" test mae force={f_test_mae:.4}"))
         np.savetxt(f"{filename}-energy_test.dat",np.hstack([reference.cpu().numpy(), predicted.cpu().numpy()]))
-        np.savetxt(f"{filename}-force_test.dat",np.hstack([f_reference.cpu().numpy(), f_predicted.cpu().numpy()]))
+        np.savetxt(f"{filename}-force_test.dat",np.hstack([f_reference.cpu().numpy().reshape(-1,1), f_predicted.cpu().numpy().reshape(-1,1)]))
     del loss
     n_epochs_total += 1
     torch.save(model.state_dict(), f"{filename}-restart.torch")
