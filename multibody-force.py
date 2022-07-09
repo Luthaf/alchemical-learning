@@ -22,6 +22,8 @@ n_epochs = 200
 n_test = 500
 n_train = 13000
 n_train_forces = 2000
+force_weight= 1.0
+N_PSEUDO_SPECIES = 4
 prefix = "sigma0.25-0.35"
 
 frames = ase.io.read("data/data_shuffle.xyz", f":{n_test + n_train + n_train_forces}")
@@ -352,7 +354,6 @@ class MultiBodyOrderModel(torch.nn.Module):
             self.power_spectrum_model.initialize_model_weights(power_spectrum_per_structure, energies, forces, seed)
 
 # species combination only
-N_PSEUDO_SPECIES = 4
 combiner = CombineSpecies(species=all_species, n_pseudo_species=N_PSEUDO_SPECIES)
 
 # # species combination and then radial basis combination
@@ -411,13 +412,6 @@ with torch.no_grad():
 
 del radial_spectrum, spherical_expansions
 
-lr = 0.1
-# optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=0.0)
-optimizer = torch.optim.LBFGS(model.parameters(), lr=lr)#, line_search_fn="strong_wolfe", history_size=128)
-
-all_losses = []
-all_tests=[]
-f_all_tests=[]
 
 filename = f"{prefix}-{model.__class__.__name__}-{N_PSEUDO_SPECIES}-mixed-{n_train}-f{n_train_forces}-train"
 if model.optimizable_weights:
@@ -425,6 +419,22 @@ if model.optimizable_weights:
 
 if model.random_initial_weights:
     filename += "-random-weights"
+
+try:
+    state = torch.load(f"{filename}-restart.torch")
+    print("Restarting model parameters from file")
+    model.load_state_dict(state)
+except:
+    print("Restart file not found")
+        
+
+lr = 0.1
+# optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=0.0)
+optimizer = torch.optim.LBFGS(model.parameters(), lr=lr)#, line_search_fn="strong_wolfe", history_size=128)
+
+all_losses = []
+all_tests=[]
+f_all_tests=[]
 
 output = open(f"{filename}.dat", "w")
 output.write("# epoch  train_loss  test_mae test_mae_f\n")
@@ -468,7 +478,9 @@ for epoch in range(n_epochs):
                     raise
                 loss += loss_mse(predicted, energies)
             raise ValueError("MUST IMPLEMENT FORCE CALCULATOR FOR THIS PATH!")
-        loss /= n_train
+        loss /= (n_train+n_train_forces)
+        loss_force /= n_train_forces
+        
         if model.composition_model is not None:
             loss += TORCH_REGULARIZER_COMPOSITION * torch.linalg.norm(model.composition_model.weights)
         if model.radial_spectrum_model is not None:
@@ -477,7 +489,7 @@ for epoch in range(n_epochs):
             loss += TORCH_REGULARIZER_POWER_SPECTRUM * torch.linalg.norm(model.power_spectrum_model.weights)
 
         print(f"Train loss: {(loss+loss_force).item()} E={loss.item()}, F={loss_force.item()}")
-        loss+=loss_force
+        loss+=loss_force*force_weight
         loss.backward(retain_graph=False)
         print("Loss gradient", np.linalg.norm(model.composition_model.weights.grad.numpy()))
         return loss
