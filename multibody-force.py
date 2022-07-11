@@ -18,7 +18,7 @@ from utils.soap import PowerSpectrum, CompositionFeatures
 
 torch.set_default_dtype(torch.float64)
 
-n_epochs = 200
+n_epochs = 100
 n_test = 500
 n_train = 13000
 n_train_forces = 2000
@@ -419,6 +419,17 @@ if model.optimizable_weights:
 
 if model.random_initial_weights:
     filename += "-random-weights"
+
+np.save(f"{filename}-pars.npy", dict(
+    n_epochs = n_epochs,
+    n_test = n_test,
+    n_train = n_train,
+    n_train_forces = n_train_forces,
+    force_weight= force_weight,
+    N_PSEUDO_SPECIES = N_PSEUDO_SPECIES,
+    HYPERS_SMALL = HYPERS_SMALL,
+    HYPERS_RADIAL = HYPERS_RADIAL ))
+
 
 try:
     state = torch.load(f"{filename}-restart.torch")
