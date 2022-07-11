@@ -117,11 +117,19 @@ device = "cpu"
 #    device = "cuda"
 print("Computing representations")
 train_dataset = AtomisticDataset(train_frames, all_species, 
-                                 {"radial_spectrum": HYPERS_RADIAL, "spherical_expansion":HYPERS_SMALL}, train_energies)
+                                 {"radial_spectrum": HYPERS_RADIAL, "spherical_expansion":HYPERS_SMALL}, train_energies,
+                                normalization = "automatic"  # normalize features so the mean size is one
+                                )
+train_normalization = { "radial_spectrum": train_dataset.radial_norm, 
+                      "spherical_expansion": train_dataset.spherical_expansion_norm}
 train_forces_dataset = AtomisticDataset(train_forces_frames, all_species, 
-                                 {"radial_spectrum": HYPERS_RADIAL, "spherical_expansion":HYPERS_SMALL}, train_forces_e)
+                                 {"radial_spectrum": HYPERS_RADIAL, "spherical_expansion":HYPERS_SMALL}, train_forces_e,
+                                normalization = train_normalization
+                                       )
 test_dataset = AtomisticDataset(test_frames, all_species, 
-                                {"radial_spectrum": HYPERS_RADIAL, "spherical_expansion":HYPERS_SMALL}, test_energies)                                
+                                {"radial_spectrum": HYPERS_RADIAL, "spherical_expansion":HYPERS_SMALL}, test_energies,
+                                normalization = train_normalization
+                               )
 
 do_gradients = True
 if do_gradients is True:
@@ -132,10 +140,12 @@ if do_gradients is True:
     HYPERS_RAD_GRAD["gradients"] = do_gradients
     train_forces_dataset_grad = AtomisticDataset(train_forces_frames, all_species, 
                                           {"radial_spectrum": HYPERS_RAD_GRAD, "spherical_expansion":HYPERS_GRAD}, 
-                                          train_forces_e, train_forces_f)
+                                          train_forces_e, train_forces_f,
+                                          normalization = train_normalization)
     test_dataset_grad = AtomisticDataset(test_frames, all_species, 
                                          {"radial_spectrum": HYPERS_RAD_GRAD, "spherical_expansion":HYPERS_GRAD}, 
-                                         test_energies, test_forces)
+                                         test_energies, test_forces,
+                                         normalization = train_normalization)
 else:
     train_forces_dataset_grad = train_forces_dataset
     test_dataset_grad = test_dataset

@@ -78,6 +78,7 @@ class AtomisticDataset(torch.utils.data.Dataset):
         hypers,
         energies,
         forces=None,
+        normalization=None,
     ):
         all_neighbor_species = Labels(
             names=["species_neighbor"],
@@ -94,7 +95,9 @@ class AtomisticDataset(torch.utils.data.Dataset):
             hypers_radial_spectrum["max_angular"] = 0
             calculator = SphericalExpansion(**hypers_radial_spectrum)
             sum_structures = SumStructures()
-
+            
+            sph_norm = 0.0
+            n_env = 0
             for frame_i, frame in enumerate(frames):
                 spherical_expansion = calculator.compute(frame)
                 spherical_expansion.keys_to_properties(all_center_species)
@@ -102,12 +105,28 @@ class AtomisticDataset(torch.utils.data.Dataset):
                 # TODO: these don't hurt, but are confusing, let's remove them
                 spherical_expansion.components_to_properties("spherical_harmonics_m")
                 spherical_expansion.keys_to_properties("spherical_harmonics_l")
-
                 spherical_expansion.keys_to_properties(all_neighbor_species)
+                n_env += len(spherical_expansion.block(0).samples)
+                for k, b in spherical_expansion:
+                    sph_norm += (b.values**2).sum()
                 # sph_structure = summer(spherical_expansion)
                 self.radial_spectrum.append(
                     sum_structures(_move_to_torch(spherical_expansion, frame_i))
                 )
+            if normalization is None:
+                self.radial_norm = None
+            else:                
+                if type(normalization) is str and normalization=="automatic":
+                    self.radial_norm = 1.0/np.sqrt(sph_norm/n_env)
+                else:
+                    self.radial_norm = normalization["radial_spectrum"]
+                for r in self.radial_spectrum:
+                    for k,b in r:
+                        b.values.data *= self.radial_norm
+                        if b.has_gradient("positions"):
+                            gradient = b.gradient("positions")
+                            view = gradient.data.view(gradient.data.dtype)
+                            view *= self.radial_norm            
         else:
             self.radial_spectrum = [None] * len(frames)
 
@@ -149,8 +168,31 @@ class AtomisticDataset(torch.utils.data.Dataset):
                     _move_to_torch(spherical_expansion, frame_i)
                 )
 
+        if normalization is None:
+            self.spherical_expansion_norm = None
+        else:
+            if type(normalization) is str and normalization=="automatic":
+                spex_norm = 0.0
+                n_env = 0            
+                for spex in self.spherical_expansions:
+                    n_env += len(spex.block(0).samples)
+                    for k,b in spex:
+                        spex_norm += ((b.values)**2).sum()
+            
+                self.spherical_expansion_norm = 1.0/np.sqrt(spex_norm/n_env)
+            else:
+                self.spherical_expansion_norm = normalization["spherical_expansion"]
+            for spex in self.spherical_expansions:
+                for k,b in spex:
+                    b.values.data *= self.spherical_expansion_norm
+                    if b.has_gradient("positions"):
+                        gradient = b.gradient("positions")
+                        view = gradient.data.view(gradient.data.dtype)
+                        view *= self.spherical_expansion_norm
+                
         self.composition = []
         if all_species is not None:
+            # composition features are intrinsically normalized
             comp_calc=CompositionFeatures(all_species)   
             for frame_i, frame in enumerate(frames):
                 comp=comp_calc([frame], np.array([frame_i], dtype=np.int32).reshape(-1,1))
