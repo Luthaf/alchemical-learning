@@ -566,7 +566,6 @@ for epoch in range(n_epochs):
 
 torch.save(model.state_dict(), f"{filename}-final.torch")
 
-
 with torch.no_grad():
     tpredicted = []
     treference = []

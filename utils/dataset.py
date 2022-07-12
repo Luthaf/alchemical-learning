@@ -57,17 +57,19 @@ def _move_to_torch(tensor_map, structure_i):
 
 
 def _move_to_torch_by_l(tensor_maps, structure_i):
-    keys = Labels(
-        names=["spherical_harmonics_l"],
-        values=np.array(list(tensor_maps.keys()), dtype=np.int32).reshape(-1, 1),
-    )
-
+    keys = []
     blocks = []
     for l, tensor_map in tensor_maps.items():
-        block = tensor_map.block(spherical_harmonics_l=l)
-        blocks.append(_block_to_torch(block, structure_i))
+        l_blocks = tensor_map.block(spherical_harmonics_l=l)
+        if not hasattr(l_blocks, "__len__"):
+            l_blocks = [l_blocks]
+        l_keys = tensor_map.keys[np.where(tensor_map.keys["spherical_harmonics_l"]==l)[0] ]
+        for k, b in zip(l_keys,l_blocks):
+            keys.append(tuple(k))
+            blocks.append(_block_to_torch(b, structure_i))
 
-    return TensorMap(keys, blocks)
+    return TensorMap(Labels(tensor_map.keys.names, np.asarray(keys, dtype=np.int32)), 
+                     blocks)
 
 
 class AtomisticDataset(torch.utils.data.Dataset):
@@ -237,7 +239,7 @@ class AtomisticDataset(torch.utils.data.Dataset):
         return data
 
 
-def _collate_tensor_map(tensors, device):
+def _collate_tensor_map_old(tensors, device):
     keys = tensors[0].keys
 
     blocks = []
@@ -301,6 +303,118 @@ def _collate_tensor_map(tensors, device):
 
     return TensorMap(keys, blocks)
 
+def _collate_tensor_map(tensors, device):
+    
+    key_names = tensors[0].keys.names
+    sample_names = tensors[0].block(0).samples.names
+    if tensors[0].block(0).has_gradient("positions"):
+        grad_sample_names = tensors[0].block(0).gradient("positions").samples.names
+    unique_keys = set()
+    for tensor in tensors:
+        unique_keys.update(set(tensor.keys.tolist()))
+    unique_keys = [ tuple(k) for k in unique_keys]
+    values_dict = { key: [] for key in unique_keys} 
+    samples_dict = { key: [] for key in unique_keys}
+    properties_dict = { key: None for key in unique_keys}
+    components_dict = { key: None for key in unique_keys}
+    grad_values_dict = { key: [] for key in unique_keys} 
+    grad_samples_dict = { key: [] for key in unique_keys}
+    grad_components_dict = { key: None for key in unique_keys}
+    for tensor in tensors:
+        for key, block in tensor:
+            key = tuple(key)
+            if components_dict[key] is None: # components and properties must be the same for each block of the same key. 
+                components_dict[key] = block.components
+                properties_dict[key] = block.properties
+            values_dict[key].append(block.values)
+            samples_dict[key].append(np.asarray(block.samples.tolist()))
+            if block.has_gradient("positions"):
+                gradient = block.gradient("positions")
+                if grad_components_dict[key] is None:
+                    grad_components_dict[key] = gradient.components                
+                grad_values_dict[key].append(gradient.data)
+                grad_samples_dict[key].append(np.asarray(gradient.samples.tolist()))
+    blocks = []
+    for key in unique_keys:
+        block = TensorBlock(values=torch.vstack(values_dict[key]).to(device),
+                            samples=Labels(names=sample_names, 
+                                           values=np.asarray(np.vstack(samples_dict[key]), dtype=np.int32) ),
+                            components=components_dict[key],
+                            properties=properties_dict[key])
+        if grad_components_dict[key] is not None:
+            block.add_gradient("positions",
+                           data=torch.vstack(grad_values_dict[key]).to(device),
+                           components=grad_components_dict[key],
+                           samples=Labels(names=grad_sample_names, 
+                                           values=np.asarray(np.vstack(grad_samples_dict[key]), dtype=np.int32) )
+                          )
+        blocks.append(block)
+                                           
+                            
+    """
+    for key_i, key in enumerate(unique_keys):
+        # this assumes that the keys are in the same order in all tensors (which
+        # should be fine in this project)
+        first_block = tensors[0].block(key_i)
+        if first_block.has_gradient("positions"):
+            first_block_grad = first_block.gradient("positions")
+        else:
+            first_block_grad = None
+
+        samples = []
+        values = []
+
+        grad_samples = []
+        grad_data = []
+        previous_samples_count = 0
+        for tensor in tensors:
+            
+            
+            block = tensor.block(key_i)
+
+            new_samples = block.samples.view(dtype=np.int32).reshape(
+                -1, len(block.samples.names)
+            )
+            samples.append(new_samples)
+            values.append(block.values)
+
+            if block.has_gradient("positions"):
+                gradient = block.gradient("positions")
+
+                new_grad_samples = (
+                    gradient.samples.view(dtype=np.int32).reshape(-1, 3).copy()
+                )
+                new_grad_samples[:, 0] += previous_samples_count
+                grad_samples.append(new_grad_samples)
+
+                grad_data.append(gradient.data)
+
+            previous_samples_count += new_samples.shape[0]
+        new_block = TensorBlock(
+            values=torch.vstack(values).to(device),
+            samples=Labels(
+                block.samples.names,
+                np.vstack(samples),
+            ),
+            components=first_block.components,
+            properties=first_block.properties,
+        )
+        if first_block_grad is not None:
+            new_block.add_gradient(
+                "positions",
+                data=torch.vstack(grad_data).to(device),
+                samples=Labels(
+                    ["sample", "structure", "atom"],
+                    np.vstack(grad_samples),
+                ),
+                components=first_block_grad.components,
+            )
+
+        blocks.append(new_block)
+    """
+    return TensorMap(
+        Labels(key_names, np.asarray(unique_keys, dtype=np.int32)),
+        blocks )
 
 def _collate_data(device, dataset):
     def do_collate(data):
