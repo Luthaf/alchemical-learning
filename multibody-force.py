@@ -9,574 +9,447 @@ import matplotlib.pyplot as plt
 import numpy as np
 import sklearn.model_selection
 import torch
+import json
 
 from utils.combine import CombineRadial, CombineRadialSpecies, CombineSpecies
 from utils.dataset import AtomisticDataset, create_dataloader
-from utils.linear import LinearModel
-from utils.operations import SumStructures, remove_gradient
-from utils.soap import PowerSpectrum, CompositionFeatures
-
+from mbmodel import CombinedPowerSpectrum, MultiBodyOrderModel
 torch.set_default_dtype(torch.float64)
 
-n_epochs = 100
-n_test = 500
-n_train = 13000
-n_train_forces = 2000
-force_weight= 1.0
-N_PSEUDO_SPECIES = 4
-prefix = "sigma0.25-0.35"
+def run_fit(datafile, parameters, device="cpu"): 
 
-frames = ase.io.read("data/data_shuffle.xyz", f":{n_test + n_train + n_train_forces}")
+    ### PARSING PARAMETERS ###
+    pars_dict = json.load(open(parameters, "r"))
+    n_epochs = pars_dict["n_epochs"]
+    n_test = pars_dict["n_test"]
+    n_train = pars_dict["n_train"]
+    n_train_forces = pars_dict["n_train_forces"]
+    force_weight= pars_dict["force_weight"]
+    N_PSEUDO_SPECIES = pars_dict["n_pseudo_species"]
+    prefix = pars_dict["prefix"]
+    HYPERS_SMALL = pars_dict["hypers_ps"]
+    if "radial_per_angular" in HYPERS_SMALL:
+        HYPERS_SMALL["radial_per_angular"] = { int(k):v for k,v in HYPERS_SMALL["radial_per_angular"].items() }
+    HYPERS_RADIAL = pars_dict["hypers_rs"]
+    
+    ### READING STUFF ###
+    print("Reading file and properties")
+    frames = ase.io.read(datafile, f":{n_test + n_train + n_train_forces}")
 
-train_frames = frames[:n_train]
-train_forces_frames = frames[n_train:n_train+n_train_forces]
-test_frames = frames[-n_test:]
+    train_frames = frames[:n_train]
+    train_forces_frames = frames[n_train:n_train+n_train_forces]
+    test_frames = frames[-n_test:]
 
-train_energies = torch.tensor(
-    [frame.info["energy"] for frame in train_frames]
-).reshape(-1, 1).to(dtype=torch.get_default_dtype())
+    train_energies = torch.tensor(
+        [frame.info["energy"] for frame in train_frames]
+    ).reshape(-1, 1).to(dtype=torch.get_default_dtype())
 
-test_energies = torch.tensor(
-    [frame.info["energy"] for frame in test_frames]
-).reshape(-1, 1).to(dtype=torch.get_default_dtype())
-
-
-train_forces_e = torch.tensor(
-    [frame.info["energy"] for frame in train_forces_frames]
-).reshape(-1, 1).to(dtype=torch.get_default_dtype())
-
-train_forces_f = [
-    torch.tensor(frame.arrays["forces"]).to(dtype=torch.get_default_dtype())
-    for frame in train_forces_frames
-]
-
-test_forces = [
-    torch.tensor(frame.arrays["forces"]).to(dtype=torch.get_default_dtype()) 
-    for frame in test_frames
-]
-
-print(f"using {n_train} training frames and {n_train_forces} force frames")
+    test_energies = torch.tensor(
+        [frame.info["energy"] for frame in test_frames]
+    ).reshape(-1, 1).to(dtype=torch.get_default_dtype())
 
 
-all_species = set()
-for frame in frames:
-    all_species.update(frame.numbers)
+    train_forces_e = torch.tensor(
+        [frame.info["energy"] for frame in train_forces_frames]
+    ).reshape(-1, 1).to(dtype=torch.get_default_dtype())
 
-all_species = list(map(lambda u: int(u), all_species))
+    train_forces_f = [
+        torch.tensor(frame.arrays["forces"]).to(dtype=torch.get_default_dtype())
+        for frame in train_forces_frames
+    ]
 
-# HYPERS_FROM_PAPER = {
-#     "interaction_cutoff": 5.0,
-#     "max_angular": 9,
-#     "max_radial": 12,
-#     "gaussian_sigma_constant": 0.3,
-#     "gaussian_sigma_type": "Constant",
-#     "cutoff_smooth_width": 0.5,
-#     "radial_basis": "GTO",
-#     "compute_gradients": False,
-#     "expansion_by_species_method": "user defined",
-#     "global_species": all_species,
-# }
+    test_forces = [
+        torch.tensor(frame.arrays["forces"]).to(dtype=torch.get_default_dtype()) 
+        for frame in test_frames
+    ]
 
-HYPERS_SMALL = {
-    "cutoff": 4.5,
-    "max_angular": 3,
-    "max_radial": 6, 
-    "atomic_gaussian_width": 0.35,
-    "cutoff_function": {"ShiftedCosine": {"width": 0.5}},
-    "radial_basis": {"SplinedGto": {"accuracy": 1e-6}},
-    "gradients": False,
-    "center_atom_weight": 1.0,
-    "radial_scaling":  {"Willatt2018": { "scale": 2.5, "rate": 0.8, "exponent": 2}}
-    # # TODO: implement this in rascaline itself
-    # "radial_per_angular": {
-    #     # l: n
-    #     0: 10,
-    #     1: 8,
-    #     2: 8,
-    #     3: 4,
-    #     4: 4,
+    print(f"using {n_train} training frames and {n_train_forces} force frames")
+
+
+    all_species = set()
+    for frame in frames:
+        all_species.update(frame.numbers)
+
+    all_species = list(map(lambda u: int(u), all_species))
+
+    # HYPERS_FROM_PAPER = {
+    #     "interaction_cutoff": 5.0,
+    #     "max_angular": 9,
+    #     "max_radial": 12,
+    #     "gaussian_sigma_constant": 0.3,
+    #     "gaussian_sigma_type": "Constant",
+    #     "cutoff_smooth_width": 0.5,
+    #     "radial_basis": "GTO",
+    #     "compute_gradients": False,
+    #     "expansion_by_species_method": "user defined",
+    #     "global_species": all_species,
     # }
-}
-
-HYPERS_RADIAL = {
-    "cutoff": 6.0,
-    "max_angular": 0,
-    "max_radial": 12,
-    "atomic_gaussian_width": 0.25,
-    "cutoff_function": {"ShiftedCosine": {"width": 0.5}},
-    "radial_basis": {"SplinedGto": {"accuracy": 1e-6}},
-    "gradients": False,
-    "center_atom_weight": 1.0,    
-    "radial_scaling":  {"Willatt2018": { "scale": 2.5, "rate": 0.8, "exponent": 2}}
-}
 
 
-device = "cpu"
+    print("Computing representations")
+    train_dataset = AtomisticDataset(train_frames, all_species, 
+                                     {"radial_spectrum": HYPERS_RADIAL, "spherical_expansion":HYPERS_SMALL}, train_energies,
+                                    normalization = "automatic"  # normalize features so the mean size is one
+                                    )
+    train_normalization = { "radial_spectrum": train_dataset.radial_norm, 
+                          "spherical_expansion": train_dataset.spherical_expansion_norm}
+    train_forces_dataset = AtomisticDataset(train_forces_frames, all_species, 
+                                     {"radial_spectrum": HYPERS_RADIAL, "spherical_expansion":HYPERS_SMALL}, train_forces_e,
+                                    normalization = train_normalization
+                                           )
+    test_dataset = AtomisticDataset(test_frames, all_species, 
+                                    {"radial_spectrum": HYPERS_RADIAL, "spherical_expansion":HYPERS_SMALL}, test_energies,
+                                    normalization = train_normalization
+                                   )
 
-#if torch.cuda.is_available():
-#    device = "cuda"
-print("Computing representations")
-train_dataset = AtomisticDataset(train_frames, all_species, 
-                                 {"radial_spectrum": HYPERS_RADIAL, "spherical_expansion":HYPERS_SMALL}, train_energies,
-                                normalization = "automatic"  # normalize features so the mean size is one
-                                )
-train_normalization = { "radial_spectrum": train_dataset.radial_norm, 
-                      "spherical_expansion": train_dataset.spherical_expansion_norm}
-train_forces_dataset = AtomisticDataset(train_forces_frames, all_species, 
-                                 {"radial_spectrum": HYPERS_RADIAL, "spherical_expansion":HYPERS_SMALL}, train_forces_e,
-                                normalization = train_normalization
-                                       )
-test_dataset = AtomisticDataset(test_frames, all_species, 
-                                {"radial_spectrum": HYPERS_RADIAL, "spherical_expansion":HYPERS_SMALL}, test_energies,
-                                normalization = train_normalization
-                               )
+    do_gradients = True   # do gradients, we need them to at least check on the test set. set force_weight to zero to cut it off
+    if do_gradients is True:
+        print("Computing data with gradients")
+        HYPERS_GRAD = copy.deepcopy(HYPERS_SMALL)
+        HYPERS_GRAD["gradients"] = do_gradients
+        HYPERS_RAD_GRAD = copy.deepcopy(HYPERS_RADIAL)
+        HYPERS_RAD_GRAD["gradients"] = do_gradients
+        train_forces_dataset_grad = AtomisticDataset(train_forces_frames, all_species, 
+                                              {"radial_spectrum": HYPERS_RAD_GRAD, "spherical_expansion":HYPERS_GRAD}, 
+                                              train_forces_e, train_forces_f,
+                                              normalization = train_normalization)
+        test_dataset_grad = AtomisticDataset(test_frames, all_species, 
+                                             {"radial_spectrum": HYPERS_RAD_GRAD, "spherical_expansion":HYPERS_GRAD}, 
+                                             test_energies, test_forces,
+                                             normalization = train_normalization)
+    else:
+        train_forces_dataset_grad = train_forces_dataset
+        test_dataset_grad = test_dataset
 
-do_gradients = True
-if do_gradients is True:
-    print("Computing data with gradients")
-    HYPERS_GRAD = copy.deepcopy(HYPERS_SMALL)
-    HYPERS_GRAD["gradients"] = do_gradients
-    HYPERS_RAD_GRAD = copy.deepcopy(HYPERS_RADIAL)
-    HYPERS_RAD_GRAD["gradients"] = do_gradients
-    train_forces_dataset_grad = AtomisticDataset(train_forces_frames, all_species, 
-                                          {"radial_spectrum": HYPERS_RAD_GRAD, "spherical_expansion":HYPERS_GRAD}, 
-                                          train_forces_e, train_forces_f,
-                                          normalization = train_normalization)
-    test_dataset_grad = AtomisticDataset(test_frames, all_species, 
-                                         {"radial_spectrum": HYPERS_RAD_GRAD, "spherical_expansion":HYPERS_GRAD}, 
-                                         test_energies, test_forces,
-                                         normalization = train_normalization)
-else:
-    train_forces_dataset_grad = train_forces_dataset
-    test_dataset_grad = test_dataset
-
-print("Creating data loaders")
-train_dataloader = create_dataloader(
-    train_dataset,
-    batch_size=200,
-    shuffle=True,    
-    device=device,
-)
-
-train_forces_dataloader = create_dataloader(
-    train_forces_dataset,
-    batch_size=200,
-    shuffle=True,    
-    device=device,
-)
-
-train_dataloader_no_batch = create_dataloader(
-    train_dataset,
-    batch_size=len(train_dataset),
-    shuffle=False,
-    device=device,
-)
-
-train_forces_dataloader_no_batch = create_dataloader(
-    train_forces_dataset,
-    batch_size=len(train_forces_dataset),
-    shuffle=False,
-    device=device,
-)
-
-train_forces_dataloader_single_frame = create_dataloader(
-    train_forces_dataset,
-    batch_size=1,
-    shuffle=False,
-    device=device,
-)
-
-test_dataloader = create_dataloader(
-    test_dataset,
-    batch_size=200,
-    shuffle=False,
-    device=device,
-)
-
-if do_gradients is True:
-    train_forces_dataloader_grad = create_dataloader(
-        train_forces_dataset_grad,
-        batch_size=50,
-        shuffle=True,
+    print("Creating data loaders")
+    train_dataloader = create_dataloader(
+        train_dataset,
+        batch_size=200,
+        shuffle=True,    
         device=device,
     )
 
-    train_forces_dataloader_grad_single_frame = create_dataloader(
-        train_forces_dataset_grad,
+    train_forces_dataloader = create_dataloader(
+        train_forces_dataset,
+        batch_size=200,
+        shuffle=True,    
+        device=device,
+    )
+
+    train_dataloader_no_batch = create_dataloader(
+        train_dataset,
+        batch_size=len(train_dataset),
+        shuffle=False,
+        device=device,
+    )
+
+    train_forces_dataloader_no_batch = create_dataloader(
+        train_forces_dataset,
+        batch_size=len(train_forces_dataset),
+        shuffle=False,
+        device=device,
+    )
+
+    train_forces_dataloader_single_frame = create_dataloader(
+        train_forces_dataset,
         batch_size=1,
         shuffle=False,
         device=device,
     )
-    
-    train_forces_dataloader_grad_no_batch = create_dataloader(
-        train_forces_dataset_grad,
-        batch_size=len(train_forces_dataset_grad),
+
+    test_dataloader = create_dataloader(
+        test_dataset,
+        batch_size=200,
         shuffle=False,
         device=device,
     )
-    
-    test_dataloader_grad = create_dataloader(
-        test_dataset_grad,
-        batch_size=50,
-        shuffle=False,
-        device=device,
-    )
-else:
-    train_forces_dataloader_grad = train_forces_dataloader
-    train_forces_dataloader_grad_single_frame = train_forces_dataloader_single_frame
-    train_forces_dataloader_grad_no_batch = train_forces_dataloader_no_batch
-    test_dataloader_grad = test_dataloader
 
+    if do_gradients is True:
+        train_forces_dataloader_grad = create_dataloader(
+            train_forces_dataset_grad,
+            batch_size=50,
+            shuffle=True,
+            device=device,
+        )
 
-def loss_mae(predicted, actual):
-    return torch.sum(torch.abs(predicted.flatten() - actual.flatten()))
-
-def loss_mse(predicted, actual):
-    return torch.sum((predicted.flatten() - actual.flatten())**2)
-
-def loss_rmse(predicted, actual):
-    return np.sqrt(loss_mse(predicted, actual))
-
-class CombinedPowerSpectrum(torch.nn.Module):
-    def __init__(self, combiner):
-        super().__init__()
-
-        self.combiner = combiner
-        self.power_spectrum = PowerSpectrum()
-
-    def forward(self, spherical_expansion):
-        combined = self.combiner(spherical_expansion)
-
-        return self.power_spectrum(combined)
-
-        
-class MultiBodyOrderModel(torch.nn.Module):
-    def __init__(
-        self, 
-        power_spectrum,
-        composition_regularizer,
-        radial_spectrum_regularizer,
-        power_spectrum_regularizer,        
-        optimizable_weights,
-        random_initial_weights,
-    ):
-        super().__init__()
-
-        self.sum_structure = SumStructures()
-
-        # optimizable_weights = False is not very well tested ...
-        assert optimizable_weights
-
-        if composition_regularizer is None:
-            self.composition_model = None
-        else:
-            self.composition_model=LinearModel(
-            regularizer=composition_regularizer,
-            optimizable_weights=optimizable_weights,
-            random_initial_weights=random_initial_weights,
+        train_forces_dataloader_grad_single_frame = create_dataloader(
+            train_forces_dataset_grad,
+            batch_size=1,
+            shuffle=False,
+            device=device,
         )
         
-        if radial_spectrum_regularizer is None:
-            self.radial_spectrum_model = None
-        else:
-            self.radial_spectrum_model = LinearModel(
-                regularizer=radial_spectrum_regularizer,
-                optimizable_weights=optimizable_weights,
-                random_initial_weights=random_initial_weights,
-            )
-
-        if power_spectrum_regularizer is None:
-            self.power_spectrum_model = None
-        else:
-            self.power_spectrum = power_spectrum
-            self.power_spectrum_model = LinearModel(
-                regularizer=power_spectrum_regularizer,
-                optimizable_weights=optimizable_weights,
-                random_initial_weights=random_initial_weights,
-            )
-
-        self.combiner = combiner, 
-        self.optimizable_weights = optimizable_weights
-        self.random_initial_weights = random_initial_weights
-
-    def forward(self, composition, radial_spectrum, spherical_expansion, forward_forces=False):
-        if not forward_forces:
-            # remove gradients if we don't need them
-            spherical_expansion = remove_gradient(spherical_expansion)
-            if radial_spectrum is not None:
-                radial_spectrum = remove_gradient(radial_spectrum)                
-    
-        energies, forces = None, None
+        train_forces_dataloader_grad_no_batch = create_dataloader(
+            train_forces_dataset_grad,
+            batch_size=len(train_forces_dataset_grad),
+            shuffle=False,
+            device=device,
+        )
         
-        if self.composition_model is not None:
-            energies_cmp, _ = self.composition_model(composition)
-            energies = energies_cmp
-            forces = None
-    
-        if self.radial_spectrum_model is not None:
-            radial_spectrum_per_structure = radial_spectrum #self.sum_structure(radial_spectrum)
-            energies_rs, forces_rs = self.radial_spectrum_model(radial_spectrum_per_structure, with_forces=forward_forces)
+        test_dataloader_grad = create_dataloader(
+            test_dataset_grad,
+            batch_size=50,
+            shuffle=False,
+            device=device,
+        )
+    else:
+        train_forces_dataloader_grad = train_forces_dataloader
+        train_forces_dataloader_grad_single_frame = train_forces_dataloader_single_frame
+        train_forces_dataloader_grad_no_batch = train_forces_dataloader_no_batch
+        test_dataloader_grad = test_dataloader
+
+
+    def loss_mae(predicted, actual):
+        return torch.sum(torch.abs(predicted.flatten() - actual.flatten()))
+
+    def loss_mse(predicted, actual):
+        return torch.sum((predicted.flatten() - actual.flatten())**2)
+
+    def loss_rmse(predicted, actual):
+        return np.sqrt(loss_mse(predicted, actual))
+
+    # species combination only
+    combiner = CombineSpecies(species=all_species, n_pseudo_species=N_PSEUDO_SPECIES)
+
+    # # species combination and then radial basis combination
+    # N_COMBINED_RADIAL = 4
+    # combiner = torch.nn.Sequential(
+    #     CombineSpecies(species=all_species, n_pseudo_species=N_PSEUDO_SPECIES),
+    #     CombineRadial(max_radial=HYPERS_SMALL["max_radial"], n_combined_radial=N_COMBINED_RADIAL),
+    # )
+
+    # # combine both radial and species information at the same time
+    # combiner = CombineRadialSpecies(
+    #     n_species=len(all_species), 
+    #     max_radial=HYPERS_SMALL["max_radial"], 
+    #     n_combined_basis=N_COMBINED_RADIAL*N_PSEUDO_SPECIES,
+    # )
+
+    power_spectrum = CombinedPowerSpectrum(combiner)
+
+    LINALG_REGULARIZER_ENERGIES = 1e-2
+    LINALG_REGULARIZER_FORCES = 1e-1
+
+    model = MultiBodyOrderModel(
+        power_spectrum=power_spectrum, 
+        composition_regularizer=[1e-10],
+        radial_spectrum_regularizer=[LINALG_REGULARIZER_ENERGIES, LINALG_REGULARIZER_FORCES],
+        power_spectrum_regularizer=[LINALG_REGULARIZER_ENERGIES, LINALG_REGULARIZER_FORCES],
+        optimizable_weights=True, 
+        random_initial_weights=True,
+    )
+
+    if model.optimizable_weights:
+        TORCH_REGULARIZER_COMPOSITION = 1e-9
+        TORCH_REGULARIZER_RADIAL_SPECTRUM = 1e-4
+        TORCH_REGULARIZER_POWER_SPECTRUM = 1e-4
+    else:
+        TORCH_REGULARIZER_RADIAL_SPECTRUM = 0.0
+        TORCH_REGULARIZER_POWER_SPECTRUM = 0.0
+
+        
+    model.to(device=device, dtype=torch.get_default_dtype())
+
+    if model.random_initial_weights:
+        dataloader_initialization = train_forces_dataloader_grad_single_frame
+    else:
+        dataloader_initialization = train_dataloader_no_batch
+        
+    print("Initializing model")    
+    # initialize the model
+    with torch.no_grad():
+        for composition, radial_spectrum, spherical_expansions, energies, forces in dataloader_initialization:
+            # we want to intially train the model on all frames, to ensure the
+            # support points come from the full dataset.
+            model.initialize_model_weights(composition, radial_spectrum, spherical_expansions, energies, forces, seed=12345)
+            break
+
+    del radial_spectrum, spherical_expansions
+
+
+    filename = f"{prefix}-{model.__class__.__name__}-{N_PSEUDO_SPECIES}-mixed-{n_train}-f{n_train_forces}-train"
+    if model.optimizable_weights:
+        filename += "-opt-weights"
+
+    if model.random_initial_weights:
+        filename += "-random-weights"
+
+    np.save(f"{filename}-pars.npy", dict(
+        n_epochs = n_epochs,
+        n_test = n_test,
+        n_train = n_train,
+        n_train_forces = n_train_forces,
+        force_weight= force_weight,
+        N_PSEUDO_SPECIES = N_PSEUDO_SPECIES,
+        HYPERS_SMALL = HYPERS_SMALL,
+        HYPERS_RADIAL = HYPERS_RADIAL ))
+
+
+    try:
+        state = torch.load(f"{filename}-restart.torch")
+        print("Restarting model parameters from file")
+        model.load_state_dict(state)
+    except:
+        print("Restart file not found")
             
-            if energies is None:
-                energies = energies_rs  
-            else:
-                energies += energies_rs              
-            if forces_rs is not None:
-                if forces is None:
-                    forces = forces_rs
-                else:
-                    forces += forces_rs
 
-        if self.power_spectrum_model is not None:
-            power_spectrum = self.power_spectrum(spherical_expansion)
-            power_spectrum_per_structure = self.sum_structure(power_spectrum)
+    lr = 0.1
+    # optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=0.0)
+    optimizer = torch.optim.LBFGS(model.parameters(), lr=lr)#, line_search_fn="strong_wolfe", history_size=128)
 
-            energies_ps, forces_ps = self.power_spectrum_model(power_spectrum_per_structure, with_forces=forward_forces)
-            if energies is None:
-                energies = energies_ps
-            else:
-                energies += energies_ps
-            if forces_ps is not None:
-                if forces is None:
-                    forces = forces_ps
-                else:
-                    forces += forces_ps
-        
-        return energies, forces
+    all_losses = []
+    all_tests=[]
+    f_all_tests=[]
 
-    def initialize_model_weights(self, composition, radial_spectrum, spherical_expansion, energies, forces=None, seed=None):
-        if forces is None:
-            # remove gradients if we don't need them
-            spherical_expansion = remove_gradient(spherical_expansion)
-            if radial_spectrum is not None:
-                radial_spectrum = remove_gradient(radial_spectrum)
-            
-        if self.composition_model is not None:
-            self.composition_model.initialize_model_weights(composition, energies, forces, seed)
-        
-        if self.radial_spectrum_model is not None:
-            radial_spectrum_per_structure = self.sum_structure(radial_spectrum)
-            self.radial_spectrum_model.initialize_model_weights(radial_spectrum_per_structure, energies, forces, seed)
-        
-        if self.power_spectrum_model is not None:        
-            power_spectrum = self.power_spectrum(spherical_expansion)
-            power_spectrum_per_structure = self.sum_structure(power_spectrum)
-            self.power_spectrum_model.initialize_model_weights(power_spectrum_per_structure, energies, forces, seed)
+    output = open(f"{filename}.dat", "w")
+    output.write("# epoch  train_loss  test_mae test_mae_f\n")
+    n_epochs_total = 0
 
-# species combination only
-combiner = CombineSpecies(species=all_species, n_pseudo_species=N_PSEUDO_SPECIES)
+    torch.save(model.state_dict(), f"{filename}-init.torch")
 
-# # species combination and then radial basis combination
-# N_COMBINED_RADIAL = 4
-# combiner = torch.nn.Sequential(
-#     CombineSpecies(species=all_species, n_pseudo_species=N_PSEUDO_SPECIES),
-#     CombineRadial(max_radial=HYPERS_SMALL["max_radial"], n_combined_radial=N_COMBINED_RADIAL),
-# )
+    assert model.optimizable_weights
+    himem = True
+    if himem:
+        composition, radial_spectrum, spherical_expansions, energies, forces = next(iter(train_dataloader_no_batch))
+        del train_dataset
+        f_composition, f_radial_spectrum, f_spherical_expansions, f_energies, f_forces = next(iter(train_forces_dataloader_grad_no_batch))
+        del train_forces_dataset
+    print("outside", composition)
+    for epoch in range(n_epochs):
+        print("Beginning epoch", epoch)
+        epoch_start = time.time()
 
-# # combine both radial and species information at the same time
-# combiner = CombineRadialSpecies(
-#     n_species=len(all_species), 
-#     max_radial=HYPERS_SMALL["max_radial"], 
-#     n_combined_basis=N_COMBINED_RADIAL*N_PSEUDO_SPECIES,
-# )
-
-composition=CompositionFeatures(all_species, device=device)
-power_spectrum = CombinedPowerSpectrum(combiner)
-
-LINALG_REGULARIZER_ENERGIES = 1e-2
-LINALG_REGULARIZER_FORCES = 1e-1
-
-model = MultiBodyOrderModel(
-    power_spectrum=power_spectrum, 
-    composition_regularizer=[1e-10],
-    radial_spectrum_regularizer=[LINALG_REGULARIZER_ENERGIES, LINALG_REGULARIZER_FORCES],
-    power_spectrum_regularizer=[LINALG_REGULARIZER_ENERGIES, LINALG_REGULARIZER_FORCES],
-    optimizable_weights=True, 
-    random_initial_weights=True,
-)
-
-if model.optimizable_weights:
-    TORCH_REGULARIZER_COMPOSITION = 1e-9
-    TORCH_REGULARIZER_RADIAL_SPECTRUM = 1e-4
-    TORCH_REGULARIZER_POWER_SPECTRUM = 1e-4
-else:
-    TORCH_REGULARIZER_RADIAL_SPECTRUM = 0.0
-    TORCH_REGULARIZER_POWER_SPECTRUM = 0.0
-
-    
-model.to(device=device, dtype=torch.get_default_dtype())
-
-if model.random_initial_weights:
-    dataloader_initialization = train_forces_dataloader_grad_single_frame
-else:
-    dataloader_initialization = train_dataloader_no_batch
-    
-print("Initializing model")    
-# initialize the model
-with torch.no_grad():
-    for composition, radial_spectrum, spherical_expansions, energies, forces in dataloader_initialization:
-        # we want to intially train the model on all frames, to ensure the
-        # support points come from the full dataset.
-        model.initialize_model_weights(composition, radial_spectrum, spherical_expansions, energies, forces, seed=12345)
-        break
-
-del radial_spectrum, spherical_expansions
-
-
-filename = f"{prefix}-{model.__class__.__name__}-{N_PSEUDO_SPECIES}-mixed-{n_train}-f{n_train_forces}-train"
-if model.optimizable_weights:
-    filename += "-opt-weights"
-
-if model.random_initial_weights:
-    filename += "-random-weights"
-
-np.save(f"{filename}-pars.npy", dict(
-    n_epochs = n_epochs,
-    n_test = n_test,
-    n_train = n_train,
-    n_train_forces = n_train_forces,
-    force_weight= force_weight,
-    N_PSEUDO_SPECIES = N_PSEUDO_SPECIES,
-    HYPERS_SMALL = HYPERS_SMALL,
-    HYPERS_RADIAL = HYPERS_RADIAL ))
-
-
-try:
-    state = torch.load(f"{filename}-restart.torch")
-    print("Restarting model parameters from file")
-    model.load_state_dict(state)
-except:
-    print("Restart file not found")
-        
-
-lr = 0.1
-# optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=0.0)
-optimizer = torch.optim.LBFGS(model.parameters(), lr=lr)#, line_search_fn="strong_wolfe", history_size=128)
-
-all_losses = []
-all_tests=[]
-f_all_tests=[]
-
-output = open(f"{filename}.dat", "w")
-output.write("# epoch  train_loss  test_mae test_mae_f\n")
-n_epochs_total = 0
-
-torch.save(model.state_dict(), f"{filename}-init.torch")
-
-assert model.optimizable_weights
-himem = True
-if himem and len(all_losses)==0:
-    composition, radial_spectrum, spherical_expansions, energies, forces = next(iter(train_dataloader_no_batch))
-    del train_dataset
-    f_composition, f_radial_spectrum, f_spherical_expansions, f_energies, f_forces = next(iter(train_forces_dataloader_grad_no_batch))
-    del train_forces_dataset
-
-for epoch in range(n_epochs):
-    print("Beginning epoch", epoch)
-    epoch_start = time.time()
-
-    def single_step():
-        global composition, radial_spectrum, spherical_expansions, energies
-        optimizer.zero_grad()
-        if device=="cuda":
-            print(f"mem. before:  {torch.cuda.memory_stats()['allocated_bytes.all.current']/1e6} MB allocated, {torch.cuda.memory_stats()['reserved_bytes.all.current']/1e6} MB reserved ")
-        loss = torch.zeros(size=(1,), device=device)
-        loss_force = torch.zeros(size=(1,), device=device)
-        if himem:
-            predicted, _ = model(composition, radial_spectrum, spherical_expansions, forward_forces=False)
-            loss += loss_mse(predicted, energies)
-            f_predicted_e, f_predicted_f = model(f_composition, f_radial_spectrum, f_spherical_expansions, forward_forces=do_gradients)
-            loss += loss_mse(f_predicted_e, f_energies)
-            if do_gradients:
-                loss_force += loss_mse(f_predicted_f, f_forces)/42
-        else:
-            for composition, radial_spectrum, spherical_expansions, energies, forces in train_dataloader:
-                try:
-                    predicted, _ = model(composition, radial_spectrum, spherical_expansions, forward_forces=False)
-                except:
-                    if device=="cuda":
-                        print(f"mem. during:  {torch.cuda.memory_stats()['allocated_bytes.all.current']/1e6} MB allocated, {torch.cuda.memory_stats()['reserved_bytes.all.current']/1e6} MB reserved ")
-                    raise
+        def single_step(composition=composition, radial_spectrum=radial_spectrum, spherical_expansions=spherical_expansions, energies=energies, forces=forces):
+            #global composition, radial_spectrum, spherical_expansions, energies
+            optimizer.zero_grad()
+            if device=="cuda":
+                print(f"mem. before:  {torch.cuda.memory_stats()['allocated_bytes.all.current']/1e6} MB allocated, {torch.cuda.memory_stats()['reserved_bytes.all.current']/1e6} MB reserved ")
+            loss = torch.zeros(size=(1,), device=device)
+            loss_force = torch.zeros(size=(1,), device=device)
+            print(composition)
+            if himem:
+                predicted, _ = model(composition, radial_spectrum, spherical_expansions, forward_forces=False)
                 loss += loss_mse(predicted, energies)
-            raise ValueError("MUST IMPLEMENT FORCE CALCULATOR FOR THIS PATH!")
-        loss /= (n_train+n_train_forces)
-        loss_force /= n_train_forces
-        
-        if model.composition_model is not None:
-            loss += TORCH_REGULARIZER_COMPOSITION * torch.linalg.norm(model.composition_model.weights)
-        if model.radial_spectrum_model is not None:
-            loss += TORCH_REGULARIZER_RADIAL_SPECTRUM * torch.linalg.norm(model.radial_spectrum_model.weights)
-        if model.power_spectrum_model is not None:
-            loss += TORCH_REGULARIZER_POWER_SPECTRUM * torch.linalg.norm(model.power_spectrum_model.weights)
-
-        print(f"Train loss: {(loss+loss_force).item()} E={loss.item()}, F={loss_force.item()}")
-        loss+=loss_force*force_weight
-        loss.backward(retain_graph=False)
-        print("Loss gradient", np.linalg.norm(model.composition_model.weights.grad.numpy()))
-        return loss
-            
-    loss = optimizer.step(single_step)
-    loss = loss.item()
-    all_losses.append(loss)
-
-    epoch_time = time.time() - epoch_start
-    if epoch % 1 == 0:
-        print("norms", np.linalg.norm(0 if model.composition_model is None else model.composition_model.weights.detach().cpu().numpy()),
-                  np.linalg.norm(0 if model.radial_spectrum_model is None else model.radial_spectrum_model.weights.detach().cpu().numpy()),
-                  np.linalg.norm(0 if model.power_spectrum_model is None else model.power_spectrum_model.weights.detach().cpu().numpy())
-                 )
-        print("gradients", 
-                  np.linalg.norm(0 if model.composition_model is None else model.composition_model.weights.grad.detach().cpu().numpy()),
-                  np.linalg.norm(0 if model.radial_spectrum_model is None else model.radial_spectrum_model.weights.grad.detach().cpu().numpy()),
-                  np.linalg.norm(0 if model.power_spectrum_model is None else model.power_spectrum_model.weights.grad.detach().cpu().numpy())
-                 )
-        with torch.no_grad():
-            predicted = []
-            reference = []
-            f_predicted = []
-            f_reference = []
-            for tcomposition, tradial_spectrum, tspherical_expansions, tenergies, tforces in test_dataloader_grad:
-                reference.append(tenergies)
-                tpredicted_e, tpredicted_f = model(tcomposition, tradial_spectrum, tspherical_expansions, forward_forces=do_gradients)
-                predicted.append(tpredicted_e)                
+                f_predicted_e, f_predicted_f = model(f_composition, f_radial_spectrum, f_spherical_expansions, forward_forces=do_gradients)
+                loss += loss_mse(f_predicted_e, f_energies)
                 if do_gradients:
-                    f_predicted.append(tpredicted_f)
-                    f_reference.append(tforces)
+                    loss_force += loss_mse(f_predicted_f, f_forces)/42
+            else:
+                for composition, radial_spectrum, spherical_expansions, energies, forces in train_dataloader:
+                    try:
+                        predicted, _ = model(composition, radial_spectrum, spherical_expansions, forward_forces=False)
+                    except:
+                        if device=="cuda":
+                            print(f"mem. during:  {torch.cuda.memory_stats()['allocated_bytes.all.current']/1e6} MB allocated, {torch.cuda.memory_stats()['reserved_bytes.all.current']/1e6} MB reserved ")
+                        raise
+                    loss += loss_mse(predicted, energies)
+                raise ValueError("MUST IMPLEMENT FORCE CALCULATOR FOR THIS PATH!")
+            loss /= (n_train+n_train_forces)
+            loss_force /= n_train_forces
+            
+            if model.composition_model is not None:
+                loss += TORCH_REGULARIZER_COMPOSITION * torch.linalg.norm(model.composition_model.weights)
+            if model.radial_spectrum_model is not None:
+                loss += TORCH_REGULARIZER_RADIAL_SPECTRUM * torch.linalg.norm(model.radial_spectrum_model.weights)
+            if model.power_spectrum_model is not None:
+                loss += TORCH_REGULARIZER_POWER_SPECTRUM * torch.linalg.norm(model.power_spectrum_model.weights)
 
-            reference = torch.vstack(reference)
-            predicted = torch.vstack(predicted)
-            test_mae = loss_mae(predicted, reference)/n_test
-            output.write(f"{n_epochs_total} {loss} {test_mae}")
-            if do_gradients:
-                f_reference = torch.vstack(f_reference)
-                f_predicted = torch.vstack(f_predicted)
-                f_test_mae = loss_mae(f_predicted, f_reference)/n_test/42
-                output.write(f"{f_test_mae}")                
-            output.write("\n")
-            output.flush()
-        all_tests.append(test_mae.item())
-        f_all_tests.append(f_test_mae.item())
-        print(f"epoch {n_epochs_total} took {epoch_time:.4}s, optimizer loss={loss:.4}, test mae={test_mae:.4}"+
-              (f" test mae force={f_test_mae:.4}"))
-        np.savetxt(f"{filename}-energy_test.dat",np.hstack([reference.cpu().numpy(), predicted.cpu().numpy()]))
-        np.savetxt(f"{filename}-force_test.dat",np.hstack([f_reference.cpu().numpy().reshape(-1,1), f_predicted.cpu().numpy().reshape(-1,1)]))
-    del loss
-    n_epochs_total += 1
-    torch.save(model.state_dict(), f"{filename}-restart.torch")
+            print(f"Train loss: {(loss+loss_force).item()} E={loss.item()}, F={loss_force.item()}")
+            loss+=loss_force*force_weight
+            loss.backward(retain_graph=False)
+            print("Loss gradient", np.linalg.norm(model.composition_model.weights.grad.numpy()))
+            return loss
+                
+        loss = optimizer.step(single_step)
+        loss = loss.item()
+        all_losses.append(loss)
 
-torch.save(model.state_dict(), f"{filename}-final.torch")
+        epoch_time = time.time() - epoch_start
+        if epoch % 1 == 0:
+            print("norms", np.linalg.norm(0 if model.composition_model is None else model.composition_model.weights.detach().cpu().numpy()),
+                      np.linalg.norm(0 if model.radial_spectrum_model is None else model.radial_spectrum_model.weights.detach().cpu().numpy()),
+                      np.linalg.norm(0 if model.power_spectrum_model is None else model.power_spectrum_model.weights.detach().cpu().numpy())
+                     )
+            print("gradients", 
+                      np.linalg.norm(0 if model.composition_model is None else model.composition_model.weights.grad.detach().cpu().numpy()),
+                      np.linalg.norm(0 if model.radial_spectrum_model is None else model.radial_spectrum_model.weights.grad.detach().cpu().numpy()),
+                      np.linalg.norm(0 if model.power_spectrum_model is None else model.power_spectrum_model.weights.grad.detach().cpu().numpy())
+                     )
+            with torch.no_grad():
+                predicted = []
+                reference = []
+                f_predicted = []
+                f_reference = []
+                for tcomposition, tradial_spectrum, tspherical_expansions, tenergies, tforces in test_dataloader_grad:
+                    reference.append(tenergies)
+                    tpredicted_e, tpredicted_f = model(tcomposition, tradial_spectrum, tspherical_expansions, forward_forces=do_gradients)
+                    predicted.append(tpredicted_e)                
+                    if do_gradients:
+                        f_predicted.append(tpredicted_f)
+                        f_reference.append(tforces)
 
-with torch.no_grad():
-    tpredicted = []
-    treference = []
-    for tcomposition, tradial_spectrum, tspherical_expansions, tenergies, _ in train_dataloader:
-        treference.append(tenergies)
-        predicted_e, _ = model(tcomposition, tradial_spectrum, tspherical_expansions, forward_forces=False)
-        tpredicted.append(predicted_e)
+                reference = torch.vstack(reference)
+                predicted = torch.vstack(predicted)
+                test_mae = loss_mae(predicted, reference)/n_test
+                output.write(f"{n_epochs_total} {loss} {test_mae}")
+                if do_gradients:
+                    f_reference = torch.vstack(f_reference)
+                    f_predicted = torch.vstack(f_predicted)
+                    f_test_mae = loss_mae(f_predicted, f_reference)/n_test/42
+                    output.write(f"{f_test_mae}")                
+                output.write("\n")
+                output.flush()
+            all_tests.append(test_mae.item())
+            f_all_tests.append(f_test_mae.item())
+            print(f"epoch {n_epochs_total} took {epoch_time:.4}s, optimizer loss={loss:.4}, test mae={test_mae:.4}"+
+                  (f" test mae force={f_test_mae:.4}"))
+            np.savetxt(f"{filename}-energy_test.dat",np.hstack([reference.cpu().numpy(), predicted.cpu().numpy()]))
+            np.savetxt(f"{filename}-force_test.dat",np.hstack([f_reference.cpu().numpy().reshape(-1,1), f_predicted.cpu().numpy().reshape(-1,1)]))
+        del loss
+        n_epochs_total += 1
+        torch.save(model.state_dict(), f"{filename}-restart.torch")
 
-    treference = torch.vstack(treference)
-    tpredicted = torch.vstack(tpredicted)
-    tmae = loss_mae(tpredicted, treference)/n_train
+    torch.save(model.state_dict(), f"{filename}-final.torch")
 
-print(f"TRAIN MAE: {tmae.item()/42} eV/at")    
-print(f"TEST MAE: {test_mae.item()/42} eV/at")
+    with torch.no_grad():
+        tpredicted = []
+        treference = []
+        for tcomposition, tradial_spectrum, tspherical_expansions, tenergies, _ in train_dataloader:
+            treference.append(tenergies)
+            predicted_e, _ = model(tcomposition, tradial_spectrum, tspherical_expansions, forward_forces=False)
+            tpredicted.append(predicted_e)
+
+        treference = torch.vstack(treference)
+        tpredicted = torch.vstack(tpredicted)
+        tmae = loss_mae(tpredicted, treference)/n_train
+
+    print(f"TRAIN MAE: {tmae.item()/42} eV/at")    
+    print(f"TEST MAE: {test_mae.item()/42} eV/at")
+    
+import argparse    
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        description="""This tool fits a potential for a multi-component system using an alchemical mixture model. 
+        Usage:
+             python multibody-force.py datafile.xyz parameters_file [-d device]
+        """
+    )
+
+    parser.add_argument(
+        "datafile",
+        type=str,
+        help="The path to the structure file that contains reference energies and forces (extended xyz format)",
+    )
+    parser.add_argument(
+        "parameters",
+        type=str,
+        help="The file containing the parameters. JSON formatted dictionary.",
+    )
+    parser.add_argument(
+        "--device",
+        type=str,
+        default="cpu",
+        help="The torch device to run the model on.",
+    )
+    args = parser.parse_args()
+    run_fit(args.datafile, args.parameters, args.device)

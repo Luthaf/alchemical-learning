@@ -128,7 +128,7 @@ class AtomisticDataset(torch.utils.data.Dataset):
                         if b.has_gradient("positions"):
                             gradient = b.gradient("positions")
                             view = gradient.data.view(gradient.data.dtype)
-                            view *= self.radial_norm            
+                            view *= self.radial_norm
         else:
             self.radial_spectrum = [None] * len(frames)
 
