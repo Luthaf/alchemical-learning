@@ -2,7 +2,13 @@ import torch
 from utils.linear import LinearModel
 from utils.operations import SumStructures, remove_gradient
 from utils.soap import PowerSpectrum, CompositionFeatures
-
+import line_profiler
+# only profile when required
+try:
+    profile
+except NameError:
+    # No line profiler, provide a pass-through version    
+    def profile(func): return func
 class CombinedPowerSpectrum(torch.nn.Module):
     def __init__(self, combiner):
         super().__init__()
@@ -10,10 +16,12 @@ class CombinedPowerSpectrum(torch.nn.Module):
         self.combiner = combiner
         self.power_spectrum = PowerSpectrum()
 
+    @profile
     def forward(self, spherical_expansion):
         combined = self.combiner(spherical_expansion)
 
-        return self.power_spectrum(combined)
+        ps = self.power_spectrum(combined)
+        return ps
 
         
 class MultiBodyOrderModel(torch.nn.Module):
@@ -25,10 +33,9 @@ class MultiBodyOrderModel(torch.nn.Module):
         power_spectrum_regularizer,        
         optimizable_weights,
         random_initial_weights,
+        ps_center_types=None,  # list of atomic types to explode the power spectrum. None to use same model for all centers (default)
     ):
         super().__init__()
-
-        self.sum_structure = SumStructures()
 
         # optimizable_weights = False is not very well tested ...
         assert optimizable_weights
@@ -54,6 +61,7 @@ class MultiBodyOrderModel(torch.nn.Module):
         if power_spectrum_regularizer is None:
             self.power_spectrum_model = None
         else:
+            self.sum_structure = SumStructures(explode_centers=ps_center_types)
             self.power_spectrum = power_spectrum
             self.power_spectrum_model = LinearModel(
                 regularizer=power_spectrum_regularizer,
@@ -64,6 +72,7 @@ class MultiBodyOrderModel(torch.nn.Module):
         self.optimizable_weights = optimizable_weights
         self.random_initial_weights = random_initial_weights
 
+    @profile
     def forward(self, composition, radial_spectrum, spherical_expansion, forward_forces=False):
         if not forward_forces:
             # remove gradients if we don't need them
@@ -120,7 +129,7 @@ class MultiBodyOrderModel(torch.nn.Module):
             self.composition_model.initialize_model_weights(composition, energies, forces, seed)
         
         if self.radial_spectrum_model is not None:
-            radial_spectrum_per_structure = self.sum_structure(radial_spectrum)
+            radial_spectrum_per_structure = radial_spectrum
             self.radial_spectrum_model.initialize_model_weights(radial_spectrum_per_structure, energies, forces, seed)
         
         if self.power_spectrum_model is not None:        

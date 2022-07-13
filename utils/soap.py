@@ -1,5 +1,11 @@
 import math
-
+import line_profiler
+# only profile when required
+try:
+    profile
+except NameError:
+    # No line profiler, provide a pass-through version    
+    def profile(func): return func
 import numpy as np
 import torch
 from equistore import Labels, TensorBlock, TensorMap
@@ -12,6 +18,7 @@ class CompositionFeatures(torch.nn.Module):
         self.species_dict = {s:i for i,s in enumerate(all_species)}    
         self.device = device
     
+    @profile
     def forward(self, frames, frames_i=None):
         data = torch.zeros(size=(len(frames), len(self.species_dict)), device=self.device)
         for i, f in enumerate(frames):
@@ -37,6 +44,7 @@ class PowerSpectrum(torch.nn.Module):
     def __init__(self):
         super().__init__()
 
+    @profile
     def forward(self, spherical_expansion: TensorMap) -> TensorMap:
         # Make sure that the expansion coefficients have the correct set of keys
         # associated with 1-center expansion coefficients.

@@ -92,7 +92,7 @@ class AtomisticDataset(torch.utils.data.Dataset):
         )       
             
         self.radial_spectrum = []
-        hypers_radial_spectrum = copy.deepcopy(hypers.get("radial_spectrum", None))
+        hypers_radial_spectrum = copy.deepcopy(hypers.get("radial_spectrum", None)) 
         if hypers_radial_spectrum is not None:
             hypers_radial_spectrum["max_angular"] = 0
             calculator = SphericalExpansion(**hypers_radial_spectrum)
@@ -110,7 +110,7 @@ class AtomisticDataset(torch.utils.data.Dataset):
                 spherical_expansion.keys_to_properties(all_neighbor_species)
                 n_env += len(spherical_expansion.block(0).samples)
                 for k, b in spherical_expansion:
-                    sph_norm += (b.values**2).sum()
+                    sph_norm += ((b.values**2).sum()).item()
                 # sph_structure = summer(spherical_expansion)
                 self.radial_spectrum.append(
                     sum_structures(_move_to_torch(spherical_expansion, frame_i))
@@ -179,7 +179,7 @@ class AtomisticDataset(torch.utils.data.Dataset):
                 for spex in self.spherical_expansions:
                     n_env += len(spex.block(0).samples)
                     for k,b in spex:
-                        spex_norm += ((b.values)**2).sum()
+                        spex_norm += ((b.values)**2).sum().item()
             
                 self.spherical_expansion_norm = 1.0/np.sqrt(spex_norm/n_env)
             else:

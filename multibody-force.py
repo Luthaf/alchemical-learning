@@ -1,8 +1,15 @@
 #command-line version of the HEA-multibody notebook (with force learning)
-
 import copy
 import cProfile
 import time
+import line_profiler
+
+# only profile when required
+try:
+    profile
+except NameError:
+    # No line profiler, provide a pass-through version    
+    def profile(func): return func
 
 import ase.io
 import matplotlib.pyplot as plt
@@ -10,6 +17,7 @@ import numpy as np
 import sklearn.model_selection
 import torch
 import json
+from datetime import datetime
 
 from utils.combine import CombineRadial, CombineRadialSpecies, CombineSpecies
 from utils.dataset import AtomisticDataset, create_dataloader
@@ -27,9 +35,19 @@ def run_fit(datafile, parameters, device="cpu"):
     force_weight= pars_dict["force_weight"]
     N_PSEUDO_SPECIES = pars_dict["n_pseudo_species"]
     prefix = pars_dict["prefix"]
+    if "normalization" in pars_dict:
+        train_normalization = pars_dict["normalization"]
+    else:
+        train_normalization = None
+    
+    do_restart = pars_dict["restart"] if "restart" in pars_dict else True # defaults to restart if file present
+    rng_seed = pars_dict["seed"] if "seed" in pars_dict else None # defaults to random seed 
+    per_center_ps = pars_dict["per_center_ps"] if "per_center_ps" in pars_dict else False
+    per_l_combine = pars_dict["per_l_combine"] if "per_l_combine" in pars_dict else False    
+        
     HYPERS_SMALL = pars_dict["hypers_ps"]
     if "radial_per_angular" in HYPERS_SMALL:
-        HYPERS_SMALL["radial_per_angular"] = { int(k):v for k,v in HYPERS_SMALL["radial_per_angular"].items() }
+        HYPERS_SMALL["radial_per_angular"] = { int(k):v for k,v in HYPERS_SMALL["radial_per_angular"].items() }        
     HYPERS_RADIAL = pars_dict["hypers_rs"]
     
     ### READING STUFF ###
@@ -72,27 +90,15 @@ def run_fit(datafile, parameters, device="cpu"):
 
     all_species = list(map(lambda u: int(u), all_species))
 
-    # HYPERS_FROM_PAPER = {
-    #     "interaction_cutoff": 5.0,
-    #     "max_angular": 9,
-    #     "max_radial": 12,
-    #     "gaussian_sigma_constant": 0.3,
-    #     "gaussian_sigma_type": "Constant",
-    #     "cutoff_smooth_width": 0.5,
-    #     "radial_basis": "GTO",
-    #     "compute_gradients": False,
-    #     "expansion_by_species_method": "user defined",
-    #     "global_species": all_species,
-    # }
-
-
     print("Computing representations")
     train_dataset = AtomisticDataset(train_frames, all_species, 
                                      {"radial_spectrum": HYPERS_RADIAL, "spherical_expansion":HYPERS_SMALL}, train_energies,
-                                    normalization = "automatic"  # normalize features so the mean size is one
+                                    normalization = train_normalization
                                     )
-    train_normalization = { "radial_spectrum": train_dataset.radial_norm, 
+    if train_normalization is not None:
+        train_normalization = { "radial_spectrum": train_dataset.radial_norm, 
                           "spherical_expansion": train_dataset.spherical_expansion_norm}
+        pars_dict["normalization"] = train_normalization # also overwrites the option, so that this will be saved in the .json parameter file
     train_forces_dataset = AtomisticDataset(train_forces_frames, all_species, 
                                      {"radial_spectrum": HYPERS_RADIAL, "spherical_expansion":HYPERS_SMALL}, train_forces_e,
                                     normalization = train_normalization
@@ -121,6 +127,7 @@ def run_fit(datafile, parameters, device="cpu"):
         train_forces_dataset_grad = train_forces_dataset
         test_dataset_grad = test_dataset
 
+    ### DATA LOADERS ###
     print("Creating data loaders")
     train_dataloader = create_dataloader(
         train_dataset,
@@ -208,8 +215,9 @@ def run_fit(datafile, parameters, device="cpu"):
     def loss_rmse(predicted, actual):
         return np.sqrt(loss_mse(predicted, actual))
 
-    # species combination only
-    combiner = CombineSpecies(species=all_species, n_pseudo_species=N_PSEUDO_SPECIES)
+    # MODEL DEFINITION
+    
+    combiner = CombineSpecies(species=all_species, n_pseudo_species=N_PSEUDO_SPECIES, per_l_max=(HYPERS_SMALL['max_angular'] if per_l_combine else 0))
 
     # # species combination and then radial basis combination
     # N_COMBINED_RADIAL = 4
@@ -237,16 +245,16 @@ def run_fit(datafile, parameters, device="cpu"):
         power_spectrum_regularizer=[LINALG_REGULARIZER_ENERGIES, LINALG_REGULARIZER_FORCES],
         optimizable_weights=True, 
         random_initial_weights=True,
+        ps_center_types=(all_species if per_center_ps else None)
     )
 
     if model.optimizable_weights:
-        TORCH_REGULARIZER_COMPOSITION = 1e-9
-        TORCH_REGULARIZER_RADIAL_SPECTRUM = 1e-4
-        TORCH_REGULARIZER_POWER_SPECTRUM = 1e-4
+        TORCH_REGULARIZER_COMPOSITION = pars_dict["regularizer_x"]
+        TORCH_REGULARIZER_RADIAL_SPECTRUM = pars_dict["regularizer_rs"]
+        TORCH_REGULARIZER_POWER_SPECTRUM = pars_dict["regularizer_ps"]
     else:
         TORCH_REGULARIZER_RADIAL_SPECTRUM = 0.0
         TORCH_REGULARIZER_POWER_SPECTRUM = 0.0
-
         
     model.to(device=device, dtype=torch.get_default_dtype())
 
@@ -255,43 +263,31 @@ def run_fit(datafile, parameters, device="cpu"):
     else:
         dataloader_initialization = train_dataloader_no_batch
         
+    ### INITIALIZE MODEL ###
     print("Initializing model")    
-    # initialize the model
     with torch.no_grad():
         for composition, radial_spectrum, spherical_expansions, energies, forces in dataloader_initialization:
             # we want to intially train the model on all frames, to ensure the
             # support points come from the full dataset.
-            model.initialize_model_weights(composition, radial_spectrum, spherical_expansions, energies, forces, seed=12345)
+            model.initialize_model_weights(composition, radial_spectrum, spherical_expansions, energies, forces, seed=rng_seed)
             break
 
     del radial_spectrum, spherical_expansions
+    npars = sum(len(p.detach().cpu().numpy().flatten()) for p in model.parameters())
+    print(f"Model parameters: {npars}")
 
+    now = datetime.now().strftime("%y%m%d-%H%M")
+    filename = f"{prefix}"
 
-    filename = f"{prefix}-{model.__class__.__name__}-{N_PSEUDO_SPECIES}-mixed-{n_train}-f{n_train_forces}-train"
-    if model.optimizable_weights:
-        filename += "-opt-weights"
+    json.dump(pars_dict, open(f"{filename}_{now}.json", "w"))
 
-    if model.random_initial_weights:
-        filename += "-random-weights"
-
-    np.save(f"{filename}-pars.npy", dict(
-        n_epochs = n_epochs,
-        n_test = n_test,
-        n_train = n_train,
-        n_train_forces = n_train_forces,
-        force_weight= force_weight,
-        N_PSEUDO_SPECIES = N_PSEUDO_SPECIES,
-        HYPERS_SMALL = HYPERS_SMALL,
-        HYPERS_RADIAL = HYPERS_RADIAL ))
-
-
-    try:
-        state = torch.load(f"{filename}-restart.torch")
-        print("Restarting model parameters from file")
-        model.load_state_dict(state)
-    except:
-        print("Restart file not found")
-            
+    if do_restart:
+        try:
+            state = torch.load(f"{filename}-restart.torch")
+            print("Restarting model parameters from file")
+            model.load_state_dict(state)
+        except FileNotFoundError:
+            print("Restart file not found")            
 
     lr = 0.1
     # optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=0.0)
@@ -301,11 +297,11 @@ def run_fit(datafile, parameters, device="cpu"):
     all_tests=[]
     f_all_tests=[]
 
-    output = open(f"{filename}.dat", "w")
+    output = open(f"{filename}_{now}.dat", "w")
     output.write("# epoch  train_loss  test_mae test_mae_f\n")
     n_epochs_total = 0
 
-    torch.save(model.state_dict(), f"{filename}-init.torch")
+    torch.save(model.state_dict(), f"{filename}_{now}-init.torch")
 
     assert model.optimizable_weights
     himem = True
@@ -314,11 +310,11 @@ def run_fit(datafile, parameters, device="cpu"):
         del train_dataset
         f_composition, f_radial_spectrum, f_spherical_expansions, f_energies, f_forces = next(iter(train_forces_dataloader_grad_no_batch))
         del train_forces_dataset
-    print("outside", composition)
     for epoch in range(n_epochs):
         print("Beginning epoch", epoch)
         epoch_start = time.time()
 
+        @profile
         def single_step(composition=composition, radial_spectrum=radial_spectrum, spherical_expansions=spherical_expansions, energies=energies, forces=forces):
             #global composition, radial_spectrum, spherical_expansions, energies
             optimizer.zero_grad()
@@ -326,7 +322,6 @@ def run_fit(datafile, parameters, device="cpu"):
                 print(f"mem. before:  {torch.cuda.memory_stats()['allocated_bytes.all.current']/1e6} MB allocated, {torch.cuda.memory_stats()['reserved_bytes.all.current']/1e6} MB reserved ")
             loss = torch.zeros(size=(1,), device=device)
             loss_force = torch.zeros(size=(1,), device=device)
-            print(composition)
             if himem:
                 predicted, _ = model(composition, radial_spectrum, spherical_expansions, forward_forces=False)
                 loss += loss_mse(predicted, energies)
@@ -407,9 +402,9 @@ def run_fit(datafile, parameters, device="cpu"):
             np.savetxt(f"{filename}-force_test.dat",np.hstack([f_reference.cpu().numpy().reshape(-1,1), f_predicted.cpu().numpy().reshape(-1,1)]))
         del loss
         n_epochs_total += 1
-        torch.save(model.state_dict(), f"{filename}-restart.torch")
+        torch.save(model.state_dict(), f"{filename}-restart.torch") # no NOW string so we can restart but keep track of initial and final files
 
-    torch.save(model.state_dict(), f"{filename}-final.torch")
+    torch.save(model.state_dict(), f"{filename}_{now}-final.torch")
 
     with torch.no_grad():
         tpredicted = []
