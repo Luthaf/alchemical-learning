@@ -1,5 +1,12 @@
 from typing import Optional
-
+import line_profiler
+# only profile when required
+try:
+    profile
+except NameError:
+    # No line profiler, provide a pass-through version    
+    def profile(func): return func
+    
 import numpy as np
 import torch
 from equistore import Labels, TensorBlock, TensorMap
@@ -50,6 +57,7 @@ def normalize(descriptor):
 
 class SumStructuresAutograd(torch.autograd.Function):
     @staticmethod
+    @profile
     def forward(
         ctx,
         values: torch.Tensor,
@@ -116,6 +124,7 @@ class SumStructuresAutograd(torch.autograd.Function):
         return new_values, new_samples, new_gradient_data, new_gradient_samples
 
     @staticmethod 
+    @profile
     def backward(
         ctx,
         grad_new_values,
@@ -137,7 +146,9 @@ class SumStructuresAutograd(torch.autograd.Function):
 
 
 class SumStructuresCXAutograd(torch.autograd.Function):
+
     @staticmethod
+    @profile
     def forward(
         ctx,
         values: torch.Tensor,
@@ -214,6 +225,7 @@ class SumStructuresCXAutograd(torch.autograd.Function):
         return new_values, new_samples, new_gradient_data, new_gradient_samples, None
 
     @staticmethod 
+    @profile
     def backward(
         ctx,
         grad_new_values,
@@ -248,6 +260,7 @@ class SumStructures(torch.nn.Module):
         if self.sum_properties:
             raise NotImplementedError()
 
+    @profile
     def forward(self, descriptor):
         blocks = []
         for _, block in descriptor:
