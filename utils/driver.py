@@ -32,14 +32,12 @@ class GenericMDCalculator:
     )
 
     def __init__(
-        self, model_path, hypers_path, is_periodic, structure_template=None, atomic_numbers=None
+        self, model_path, model_state_path, is_periodic, structure_template=None, atomic_numbers=None
     ):
         super().__init__()
         #self.model = torch.load(model_pt)
         # Structure initialization
         self.is_periodic = is_periodic
-        self.hypers = json.load(open(hypers_path),  object_hook=lambda d: {int(k) if k.lstrip('-').isdigit() else k: v for k, v in d.items()})
-        
 
         if structure_template is not None:
             self.template_filename = structure_template
@@ -63,8 +61,16 @@ class GenericMDCalculator:
         print(len(self.atoms))
         energies = torch.tensor([[0.]])
         forces =  [torch.tensor(np.zeros((len(frames[0]), 3)))]
-        HYPERS = self.hypers
-        dataset_grad = AtomisticDataset(frames, all_species, HYPERS, energies, forces)
+
+        self.model_state = json.load(open(model_state_path),  object_hook=lambda d: {int(k) if k.lstrip('-').isdigit() else k: v for k, v in d.items()})
+        
+
+        self.hypers = {}
+        if "spherical_expansion" in self.model_state:
+            self.hypers["spherical_expansion"] = self.model_state["spherical_expansion"]
+        if "radial_spectrum" in self.model_state:
+            self.hypers["radial_spectrum"] = self.model_state["radial_spectrum"]
+        dataset_grad = AtomisticDataset(frames, all_species, self.hypers, energies, forces)
         
         dataloader_grad = create_dataloader(
         dataset_grad,
@@ -72,12 +78,13 @@ class GenericMDCalculator:
         shuffle=False,
         device=device,
         )
-
-        N_PSEUDO_SPECIES = 4
+        if "n_pseudo_species" in self.model_state:
+            N_PSEUDO_SPECIES = self.model_state["n_pseudo_species"]
+        else:
+            N_PSEUDO_SPECIES = 4
         TORCH_REGULARIZER = 1e-2
         LINALG_REGULARIZER_ENERGIES = 1e-2
         LINALG_REGULARIZER_FORCES = 1e-1
-        N_COMBINED_RADIAL = 4
         COMBINER = "species" #  "sequential" # "radial_species"
         if COMBINER=="species":
             combiner = CombineSpecies(species=all_species, n_pseudo_species=N_PSEUDO_SPECIES)
@@ -148,7 +155,7 @@ class GenericMDCalculator:
         energies = torch.tensor([[0.]])
         forces =  [torch.tensor(np.zeros((len(frames[0]), 3)))]
         HYPERS =  self.hypers
-        dataset_grad = AtomisticDataset(frames, all_species, HYPERS, energies, forces)
+        dataset_grad = AtomisticDataset(frames, all_species,self.hypers, energies, forces)
         
         dataloader_grad = create_dataloader(
         dataset_grad,
