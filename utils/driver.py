@@ -12,25 +12,6 @@ from .linear import LinearModel
 from .operations import SumStructures, remove_gradient
 torch.set_default_dtype(torch.float64)
 
-HYPERS_SMALL = {
-        "cutoff": 4.0,
-        "max_angular": 4,
-        "max_radial": 8,
-        "center_atom_weight":1, 
-        "atomic_gaussian_width": 0.3,
-        "cutoff_function": {"ShiftedCosine": {"width": 0.5}},
-        "radial_basis": {"SplinedGto": {"accuracy": 1e-6}},
-        "gradients": True,
-        # TODO: implement this in rascaline itself
-        "radial_per_angular": {
-            # l: n
-            0: 10,
-            1: 8,
-            2: 8,
-            3: 4,
-            4: 4,
-        }
-        }
 
 device = 'cpu'
 
