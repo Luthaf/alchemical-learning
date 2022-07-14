@@ -202,7 +202,7 @@ def _species_coupling_matrix(species, n_contracted):
     K = np.zeros((len(species), len(species)))
 
     SIGMA_EPSILON = 1.0
-    SIGMA_RADIUS = 1.0
+    SIGMA_RADIUS = 10.0
 
     for i, species_i in enumerate(species):
         constants_i = ATOMIC_DATA_PER_SPECIES[species_i]
@@ -221,6 +221,7 @@ def _species_coupling_matrix(species, n_contracted):
 
     eva, eve = np.linalg.eigh(K)
     eve = eve[:,::-1]
+    print("Species mixing init with eigenvalues ", eva[-n_contracted:])
     return eve[:,:n_contracted:].copy()
 
 
