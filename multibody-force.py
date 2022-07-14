@@ -35,16 +35,14 @@ def run_fit(datafile, parameters, device="cpu"):
     force_weight= pars_dict["force_weight"]
     N_PSEUDO_SPECIES = pars_dict["n_pseudo_species"]
     prefix = pars_dict["prefix"]
-    if "normalization" in pars_dict:
-        train_normalization = pars_dict["normalization"]
-    else:
-        train_normalization = None
-    
+
+    train_normalization =  pars_dict["normalization"] if "normalization" in pars_dict else None
     do_restart = pars_dict["restart"] if "restart" in pars_dict else True # defaults to restart if file present
     rng_seed = pars_dict["seed"] if "seed" in pars_dict else None # defaults to random seed 
     per_center_ps = pars_dict["per_center_ps"] if "per_center_ps" in pars_dict else False
     per_l_combine = pars_dict["per_l_combine"] if "per_l_combine" in pars_dict else False    
-        
+    learning_rate = pars_dict["learning_rate"] if "learning_rate" in pars_dict else 0.05
+
     HYPERS_SMALL = pars_dict["hypers_ps"]
     if "radial_per_angular" in HYPERS_SMALL:
         HYPERS_SMALL["radial_per_angular"] = { int(k):v for k,v in HYPERS_SMALL["radial_per_angular"].items() }        
@@ -289,9 +287,9 @@ def run_fit(datafile, parameters, device="cpu"):
         except FileNotFoundError:
             print("Restart file not found")            
 
-    lr = 0.1
+    lr = learning_rate
     # optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=0.0)
-    optimizer = torch.optim.LBFGS(model.parameters(), lr=lr)#, line_search_fn="strong_wolfe", history_size=128)
+    optimizer = torch.optim.LBFGS(model.parameters(), lr=lr, line_search_fn="strong_wolfe", history_size=128)
 
     all_losses = []
     all_tests=[]
