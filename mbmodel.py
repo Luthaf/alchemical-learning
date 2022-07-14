@@ -9,6 +9,13 @@ try:
 except NameError:
     # No line profiler, provide a pass-through version    
     def profile(func): return func
+    
+MB_DEFAULT_OPTIONS = {
+
+
+
+}
+    
 class CombinedPowerSpectrum(torch.nn.Module):
     def __init__(self, combiner):
         super().__init__()

@@ -36,6 +36,7 @@ def run_fit(datafile, parameters, device="cpu"):
     N_PSEUDO_SPECIES = pars_dict["n_pseudo_species"]
     prefix = pars_dict["prefix"]
 
+    N_COMBINED = pars_dict["n_mixed_basis"] if "n_mixed_basis" in pars_dict else 0
     train_normalization =  pars_dict["normalization"] if "normalization" in pars_dict else None
     do_restart = pars_dict["restart"] if "restart" in pars_dict else True # defaults to restart if file present
     rng_seed = pars_dict["seed"] if "seed" in pars_dict else None # defaults to random seed 
@@ -214,9 +215,11 @@ def run_fit(datafile, parameters, device="cpu"):
         return np.sqrt(loss_mse(predicted, actual))
 
     # MODEL DEFINITION
+    if N_COMBINED > 0:
+        combiner = CombineRadialSpecies(n_species=len(all_species), max_radial=HYPERS_SMALL['max_radial'], n_combined_basis=N_COMBINED)# , per_l_max=(HYPERS_SMALL['max_angular'] if per_l_combine else 0))
+    elif N_PSEUDO_SPECIES > 0:
+        combiner = CombineSpecies(species=all_species, n_pseudo_species=N_PSEUDO_SPECIES, per_l_max=(HYPERS_SMALL['max_angular'] if per_l_combine else 0))
     
-    combiner = CombineSpecies(species=all_species, n_pseudo_species=N_PSEUDO_SPECIES, per_l_max=(HYPERS_SMALL['max_angular'] if per_l_combine else 0))
-
     # # species combination and then radial basis combination
     # N_COMBINED_RADIAL = 4
     # combiner = torch.nn.Sequential(
