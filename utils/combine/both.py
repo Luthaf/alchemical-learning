@@ -5,7 +5,12 @@ from equistore import Labels, TensorBlock, TensorMap
 
 class CombineRadialSpecies(torch.nn.Module):
     def __init__(
-        self, n_species, max_radial, n_combined_basis, *, explicit_combining_matrix=None
+        self,
+        n_species,
+        max_radial,
+        n_combined_basis,
+        *,
+        explicit_combining_matrix=None,
     ):
         super().__init__()
         self.n_species = n_species

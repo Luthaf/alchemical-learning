@@ -7,8 +7,8 @@ from equistore import Labels, TensorBlock, TensorMap
 from rascaline import SphericalExpansion
 
 from .operations import SumStructures
-from time import time
 from .soap import CompositionFeatures
+
 
 def _block_to_torch(block, structure_i):
     assert block.samples.names[0] == "structure"
@@ -63,13 +63,16 @@ def _move_to_torch_by_l(tensor_maps, structure_i):
         l_blocks = tensor_map.block(spherical_harmonics_l=l)
         if not hasattr(l_blocks, "__len__"):
             l_blocks = [l_blocks]
-        l_keys = tensor_map.keys[np.where(tensor_map.keys["spherical_harmonics_l"]==l)[0] ]
-        for k, b in zip(l_keys,l_blocks):
+        l_keys = tensor_map.keys[
+            np.where(tensor_map.keys["spherical_harmonics_l"] == l)[0]
+        ]
+        for k, b in zip(l_keys, l_blocks):
             keys.append(tuple(k))
             blocks.append(_block_to_torch(b, structure_i))
 
-    return TensorMap(Labels(tensor_map.keys.names, np.asarray(keys, dtype=np.int32)), 
-                     blocks)
+    return TensorMap(
+        Labels(tensor_map.keys.names, np.asarray(keys, dtype=np.int32)), blocks
+    )
 
 
 class AtomisticDataset(torch.utils.data.Dataset):
@@ -89,15 +92,15 @@ class AtomisticDataset(torch.utils.data.Dataset):
         all_center_species = Labels(
             names=["species_center"],
             values=np.array(all_species, dtype=np.int32).reshape(-1, 1),
-        )       
-            
+        )
+
         self.radial_spectrum = []
-        hypers_radial_spectrum = copy.deepcopy(hypers.get("radial_spectrum", None)) 
+        hypers_radial_spectrum = copy.deepcopy(hypers.get("radial_spectrum", None))
         if hypers_radial_spectrum is not None:
             hypers_radial_spectrum["max_angular"] = 0
             calculator = SphericalExpansion(**hypers_radial_spectrum)
             sum_structures = SumStructures()
-            
+
             sph_norm = 0.0
             n_env = 0
             for frame_i, frame in enumerate(frames):
@@ -117,13 +120,13 @@ class AtomisticDataset(torch.utils.data.Dataset):
                 )
             if normalization is None:
                 self.radial_norm = None
-            else:                
-                if type(normalization) is str and normalization=="automatic":
-                    self.radial_norm = 1.0/np.sqrt(sph_norm/n_env)
+            else:
+                if type(normalization) is str and normalization == "automatic":
+                    self.radial_norm = 1.0 / np.sqrt(sph_norm / n_env)
                 else:
                     self.radial_norm = normalization["radial_spectrum"]
                 for r in self.radial_spectrum:
-                    for k,b in r:
+                    for k, b in r:
                         b.values.data *= self.radial_norm
                         if b.has_gradient("positions"):
                             gradient = b.gradient("positions")
@@ -173,37 +176,37 @@ class AtomisticDataset(torch.utils.data.Dataset):
         if normalization is None:
             self.spherical_expansion_norm = None
         else:
-            if type(normalization) is str and normalization=="automatic":
+            if type(normalization) is str and normalization == "automatic":
                 spex_norm = 0.0
-                n_env = 0            
+                n_env = 0
                 for spex in self.spherical_expansions:
                     n_env += len(spex.block(0).samples)
-                    for k,b in spex:
-                        spex_norm += ((b.values)**2).sum().item()
-            
-                self.spherical_expansion_norm = 1.0/np.sqrt(spex_norm/n_env)
+                    for k, b in spex:
+                        spex_norm += ((b.values) ** 2).sum().item()
+
+                self.spherical_expansion_norm = 1.0 / np.sqrt(spex_norm / n_env)
             else:
                 self.spherical_expansion_norm = normalization["spherical_expansion"]
             for spex in self.spherical_expansions:
-                for k,b in spex:
+                for k, b in spex:
                     b.values.data *= self.spherical_expansion_norm
                     if b.has_gradient("positions"):
                         gradient = b.gradient("positions")
                         view = gradient.data.view(gradient.data.dtype)
                         view *= self.spherical_expansion_norm
-                
+
         self.composition = []
         if all_species is not None:
             # composition features are intrinsically normalized
-            comp_calc=CompositionFeatures(all_species)   
+            comp_calc = CompositionFeatures(all_species)
             for frame_i, frame in enumerate(frames):
-                comp=comp_calc([frame], np.array([frame_i], dtype=np.int32).reshape(-1,1))
-                self.composition.append(
-                    comp
+                comp = comp_calc(
+                    [frame], np.array([frame_i], dtype=np.int32).reshape(-1, 1)
                 )
+                self.composition.append(comp)
         else:
-            self.composition = [None] * len(frames)                
-                
+            self.composition = [None] * len(frames)
+
         assert isinstance(energies, torch.Tensor)
         assert energies.shape == (len(frames), 1)
         self.energies = energies
@@ -303,8 +306,9 @@ def _collate_tensor_map_old(tensors, device):
 
     return TensorMap(keys, blocks)
 
+
 def _collate_tensor_map(tensors, device):
-    
+
     key_names = tensors[0].keys.names
     sample_names = tensors[0].block(0).samples.names
     if tensors[0].block(0).has_gradient("positions"):
@@ -312,18 +316,20 @@ def _collate_tensor_map(tensors, device):
     unique_keys = set()
     for tensor in tensors:
         unique_keys.update(set(tensor.keys.tolist()))
-    unique_keys = [ tuple(k) for k in unique_keys]
-    values_dict = { key: [] for key in unique_keys} 
-    samples_dict = { key: [] for key in unique_keys}
-    properties_dict = { key: None for key in unique_keys}
-    components_dict = { key: None for key in unique_keys}
-    grad_values_dict = { key: [] for key in unique_keys} 
-    grad_samples_dict = { key: [] for key in unique_keys}
-    grad_components_dict = { key: None for key in unique_keys}
+    unique_keys = [tuple(k) for k in unique_keys]
+    values_dict = {key: [] for key in unique_keys}
+    samples_dict = {key: [] for key in unique_keys}
+    properties_dict = {key: None for key in unique_keys}
+    components_dict = {key: None for key in unique_keys}
+    grad_values_dict = {key: [] for key in unique_keys}
+    grad_samples_dict = {key: [] for key in unique_keys}
+    grad_components_dict = {key: None for key in unique_keys}
     for tensor in tensors:
         for key, block in tensor:
             key = tuple(key)
-            if components_dict[key] is None: # components and properties must be the same for each block of the same key. 
+            if components_dict[key] is None:
+                # components and properties must be the same for each block of
+                # the same key.
                 components_dict[key] = block.components
                 properties_dict[key] = block.properties
             values_dict[key].append(block.values)
@@ -331,26 +337,34 @@ def _collate_tensor_map(tensors, device):
             if block.has_gradient("positions"):
                 gradient = block.gradient("positions")
                 if grad_components_dict[key] is None:
-                    grad_components_dict[key] = gradient.components                
+                    grad_components_dict[key] = gradient.components
                 grad_values_dict[key].append(gradient.data)
                 grad_samples_dict[key].append(np.asarray(gradient.samples.tolist()))
     blocks = []
     for key in unique_keys:
-        block = TensorBlock(values=torch.vstack(values_dict[key]).to(device),
-                            samples=Labels(names=sample_names, 
-                                           values=np.asarray(np.vstack(samples_dict[key]), dtype=np.int32) ),
-                            components=components_dict[key],
-                            properties=properties_dict[key])
+        block = TensorBlock(
+            values=torch.vstack(values_dict[key]).to(device),
+            samples=Labels(
+                names=sample_names,
+                values=np.asarray(np.vstack(samples_dict[key]), dtype=np.int32),
+            ),
+            components=components_dict[key],
+            properties=properties_dict[key],
+        )
         if grad_components_dict[key] is not None:
-            block.add_gradient("positions",
-                           data=torch.vstack(grad_values_dict[key]).to(device),
-                           components=grad_components_dict[key],
-                           samples=Labels(names=grad_sample_names, 
-                                           values=np.asarray(np.vstack(grad_samples_dict[key]), dtype=np.int32) )
-                          )
+            block.add_gradient(
+                "positions",
+                data=torch.vstack(grad_values_dict[key]).to(device),
+                components=grad_components_dict[key],
+                samples=Labels(
+                    names=grad_sample_names,
+                    values=np.asarray(
+                        np.vstack(grad_samples_dict[key]), dtype=np.int32
+                    ),
+                ),
+            )
         blocks.append(block)
-                                           
-                            
+
     """
     for key_i, key in enumerate(unique_keys):
         # this assumes that the keys are in the same order in all tensors (which
@@ -368,8 +382,8 @@ def _collate_tensor_map(tensors, device):
         grad_data = []
         previous_samples_count = 0
         for tensor in tensors:
-            
-            
+
+
             block = tensor.block(key_i)
 
             new_samples = block.samples.view(dtype=np.int32).reshape(
@@ -412,13 +426,12 @@ def _collate_tensor_map(tensors, device):
 
         blocks.append(new_block)
     """
-    return TensorMap(
-        Labels(key_names, np.asarray(unique_keys, dtype=np.int32)),
-        blocks )
+    return TensorMap(Labels(key_names, np.asarray(unique_keys, dtype=np.int32)), blocks)
+
 
 def _collate_data(device, dataset):
     def do_collate(data):
-        start=time()
+        start = time()
         composition = [d[0] for d in data]
         if composition[0] is None:
             composition = None
@@ -438,7 +451,7 @@ def _collate_data(device, dataset):
             forces = torch.vstack([d[4] for d in data]).to(device=device)
         else:
             forces = None
-        dataset._collatetime+=time()-start
+        dataset._collatetime += time() - start
         return composition, radial_spectrum, spherical_expansion, energies, forces
 
     return do_collate

@@ -1,12 +1,14 @@
 from typing import Optional
-import line_profiler
+
 # only profile when required
 try:
     profile
 except NameError:
-    # No line profiler, provide a pass-through version    
-    def profile(func): return func
-    
+    # No line profiler, provide a pass-through version
+    def profile(func):
+        return func
+
+
 import numpy as np
 import torch
 from equistore import Labels, TensorBlock, TensorMap
@@ -65,65 +67,91 @@ class SumStructuresAutograd(torch.autograd.Function):
         gradient_data: Optional[torch.Tensor],
         gradient_samples: Optional[Labels],
     ):
-    
+
         # get the unique entries in samples["structure"] without
         # sorting the result (that would break pytorch dataloader shuffling)
         samples_structure = samples["structure"]
-        unique_structures, unique_structures_idx = np.unique(samples_structure, return_index=True)        
-        new_samples = samples_structure[np.sort(unique_structures_idx)]       
-        # we need a list keeping track of where each atomic contribution goes 
-        # (e.g. if structure ids are [3,3,3,1,1,1,6,6,6] that will be stored as 
-        # the unique structures [3, 1, 6], structure_map will be 
+        unique_structures, unique_structures_idx = np.unique(
+            samples_structure, return_index=True
+        )
+        new_samples = samples_structure[np.sort(unique_structures_idx)]
+        # we need a list keeping track of where each atomic contribution goes
+        # (e.g. if structure ids are [3,3,3,1,1,1,6,6,6] that will be stored as
+        # the unique structures [3, 1, 6], structure_map will be
         # [0,0,0,1,1,1,2,2,2]
         replace_rule = dict(zip(unique_structures, range(len(unique_structures))))
-        structure_map = torch.tensor([replace_rule[i] for i in samples_structure], dtype = torch.long, device=values.device)       
+        structure_map = torch.tensor(
+            [replace_rule[i] for i in samples_structure],
+            dtype=torch.long,
+            device=values.device,
+        )
 
         new_values = torch.zeros(
             (len(new_samples), *values.shape[1:]),
             device=values.device,
         )
         new_values.index_add_(0, structure_map, values)
-        
+
         if gradient_data is not None:
             assert gradient_samples is not None
-            do_gradients = True
 
-            # here we need to get unique _gradient_ elements, so [A,j] pairs. The i-atom index is summed over
-            # and we don't need to know it explicitly. We convert Labels slices to tuples so we can hash them to make a dict            
-            gradient_samples_Aj = np.asarray(gradient_samples[["structure", "atom"]], dtype=tuple) 
-            unique_gradient, unique_gradient_idx = np.unique(gradient_samples_Aj, return_index=True)        
+            # here we need to get unique _gradient_ elements, so [A,j] pairs.
+            # The i-atom index is summed over and we don't need to know it
+            # explicitly. We convert Labels slices to tuples so we can hash them
+            # to make a dict
+            gradient_samples_Aj = np.asarray(
+                gradient_samples[["structure", "atom"]], dtype=tuple
+            )
+            unique_gradient, unique_gradient_idx = np.unique(
+                gradient_samples_Aj, return_index=True
+            )
             new_gradient_samples = gradient_samples_Aj[np.sort(unique_gradient_idx)]
-            # the logic is analogous to that for the structures: we have to map positions in the full (A,i,j) vector to the
-            # position where they will have to be accumulated
-            gradient_replace_rule = dict(zip(unique_gradient, range(len(unique_gradient))))
-            gradient_map = torch.tensor([gradient_replace_rule[i] for i in gradient_samples_Aj], dtype = torch.long, device=gradient_data.device)
-            
+            # the logic is analogous to that for the structures: we have to map
+            # positions in the full (A,i,j) vector to the position where they
+            # will have to be accumulated
+            gradient_replace_rule = dict(
+                zip(unique_gradient, range(len(unique_gradient)))
+            )
+            gradient_map = torch.tensor(
+                [gradient_replace_rule[i] for i in gradient_samples_Aj],
+                dtype=torch.long,
+                device=gradient_data.device,
+            )
+
             new_gradient_data = torch.zeros(
                 (len(unique_gradient), *gradient_data.shape[1:]),
                 device=gradient_data.device,
             )
             # ... and then contracting the gradients is just one call
             new_gradient_data.index_add_(0, gradient_map, gradient_data)
-            
+
             # builds gradient labels
             ug_array = np.vstack(unique_gradient)
             new_gradient_samples = Labels(
                 names=["sample", "structure", "atom"],
-                values=np.asarray(np.hstack([np.asarray([replace_rule[i] for i in ug_array[:,0]]).reshape(-1,1),
-                 ug_array]), dtype=np.int32))
-            ctx.gradient_map = gradient_map            
+                values=np.asarray(
+                    np.hstack(
+                        [
+                            np.asarray(
+                                [replace_rule[i] for i in ug_array[:, 0]]
+                            ).reshape(-1, 1),
+                            ug_array,
+                        ]
+                    ),
+                    dtype=np.int32,
+                ),
+            )
+            ctx.gradient_map = gradient_map
         else:
-            do_gradients = False
             new_gradient_data = None
             new_gradient_samples = None
-            grad_samples_mapping = None        
-            
+
         ctx.structure_map = structure_map
         ctx.save_for_backward(values, gradient_data)
 
         return new_values, new_samples, new_gradient_data, new_gradient_samples
 
-    @staticmethod 
+    @staticmethod
     @profile
     def backward(
         ctx,
@@ -138,15 +166,14 @@ class SumStructuresAutograd(torch.autograd.Function):
 
         if values.requires_grad:
             grad_values = grad_new_values[ctx.structure_map, ...]
-            
+
         if gradient_data is not None and gradient_data.requires_grad:
-            grad_gradient_data = grad_new_gradient_data[ctx.gradient_map]        
+            grad_gradient_data = grad_new_gradient_data[ctx.gradient_map]
 
         return grad_values, None, grad_gradient_data, None
 
 
 class SumStructuresCXAutograd(torch.autograd.Function):
-
     @staticmethod
     @profile
     def forward(
@@ -157,74 +184,114 @@ class SumStructuresCXAutograd(torch.autograd.Function):
         gradient_samples: Optional[Labels],
         unique_types,
     ):
-    
+
         replace_types = dict(zip(unique_types, range(len(unique_types))))
         # get the unique entries in samples["structure"] without
         # sorting the result (that would break pytorch dataloader shuffling)
         samples_structure = samples["structure"]
-        unique_structures, unique_structures_idx = np.unique(samples_structure, return_index=True)        
-        new_samples = samples_structure[np.sort(unique_structures_idx)]       
-        # we need a list keeping track of where each atomic contribution goes 
-        # (e.g. if structure ids are [3,3,3,1,1,1,6,6,6] that will be stored as 
-        # the unique structures [3, 1, 6], structure_map will be 
+        unique_structures, unique_structures_idx = np.unique(
+            samples_structure, return_index=True
+        )
+        new_samples = samples_structure[np.sort(unique_structures_idx)]
+        # we need a list keeping track of where each atomic contribution goes
+        # (e.g. if structure ids are [3,3,3,1,1,1,6,6,6] that will be stored as
+        # the unique structures [3, 1, 6], structure_map will be
         # [0,0,0,1,1,1,2,2,2]
         replace_rule = dict(zip(unique_structures, range(len(unique_structures))))
-        structure_map = torch.tensor([replace_rule[i] for i in samples_structure], dtype = torch.long, device=values.device)       
-        new_values = torch.zeros(
-            (len(new_samples), values.shape[1]*len(unique_types)),
+        structure_map = torch.tensor(
+            [replace_rule[i] for i in samples_structure],
+            dtype=torch.long,
             device=values.device,
         )
-        
-        ctx.species_slice = [ replace_types[s] for s in samples["species_center"] ]
+        new_values = torch.zeros(
+            (len(new_samples), values.shape[1] * len(unique_types)),
+            device=values.device,
+        )
+
+        ctx.species_slice = [replace_types[s] for s in samples["species_center"]]
         for t in unique_types:
-            idx_t = np.where(samples["species_center"]==t)[0]
-            new_values[:,values.shape[1]*replace_types[t]:values.shape[1]*(1+replace_types[t])].index_add_(0, structure_map[idx_t], values[idx_t])
-        
+            idx_t = np.where(samples["species_center"] == t)[0]
+
+            type_start = values.shape[1] * replace_types[t]
+            type_stop = values.shape[1] * (1 + replace_types[t])
+            new_values[:, type_start:type_stop].index_add_(
+                0, structure_map[idx_t], values[idx_t]
+            )
+
         if gradient_data is not None:
             assert gradient_samples is not None
-            do_gradients = True
 
-            # here we need to get unique _gradient_ elements, so [A,j] pairs. The i-atom index is summed over
-            # and we don't need to know it explicitly. We convert Labels slices to tuples so we can hash them to make a dict                        
-            gradient_samples_Aj = np.asarray(gradient_samples[["structure", "atom"]], dtype=tuple) 
-            unique_gradient, unique_gradient_idx = np.unique(gradient_samples_Aj, return_index=True)        
+            # here we need to get unique _gradient_ elements, so [A,j] pairs.
+            # The i-atom index is summed over and we don't need to know it
+            # explicitly. We convert Labels slices to tuples so we can hash them
+            # to make a dict
+            gradient_samples_Aj = np.asarray(
+                gradient_samples[["structure", "atom"]], dtype=tuple
+            )
+            unique_gradient, unique_gradient_idx = np.unique(
+                gradient_samples_Aj, return_index=True
+            )
             new_gradient_samples = gradient_samples_Aj[np.sort(unique_gradient_idx)]
-            # the logic is analogous to that for the structures: we have to map positions in the full (A,i,j) vector to the
-            # position where they will have to be accumulated
-            gradient_replace_rule = dict(zip(unique_gradient, range(len(unique_gradient))))
-            gradient_map = torch.tensor([gradient_replace_rule[i] for i in gradient_samples_Aj], dtype = torch.long, device=gradient_data.device)
-            
-            new_gradient_data = torch.zeros(
-                (len(unique_gradient), gradient_data.shape[1], gradient_data.shape[2]*len(unique_types)),
+            # the logic is analogous to that for the structures: we have to map
+            # positions in the full (A,i,j) vector to the position where they
+            # will have to be accumulated
+            gradient_replace_rule = dict(
+                zip(unique_gradient, range(len(unique_gradient)))
+            )
+            gradient_map = torch.tensor(
+                [gradient_replace_rule[i] for i in gradient_samples_Aj],
+                dtype=torch.long,
                 device=gradient_data.device,
             )
-            
+
+            new_gradient_data = torch.zeros(
+                (
+                    len(unique_gradient),
+                    gradient_data.shape[1],
+                    gradient_data.shape[2] * len(unique_types),
+                ),
+                device=gradient_data.device,
+            )
+
             species_center = samples["species_center"][gradient_samples["sample"]]
-            ctx.gradient_slice = [ replace_types[s] for s in species_center ]
+            ctx.gradient_slice = [replace_types[s] for s in species_center]
             # ... and then contracting the gradients is just one call
             for t in unique_types:
-                idx_t = np.where(species_center==t)[0]
-                new_gradient_data[...,gradient_data.shape[-1]*replace_types[t]:gradient_data.shape[-1]*(replace_types[t]+1)].index_add_(0, gradient_map[idx_t], gradient_data[idx_t])
-            
+                idx_t = np.where(species_center == t)[0]
+
+                type_start = gradient_data.shape[-1] * replace_types[t]
+                type_stop = gradient_data.shape[-1] * (replace_types[t] + 1)
+                new_gradient_data[..., type_start:type_stop].index_add_(
+                    0, gradient_map[idx_t], gradient_data[idx_t]
+                )
+
             # builds gradient labels
             ug_array = np.vstack(unique_gradient)
             new_gradient_samples = Labels(
                 names=["sample", "structure", "atom"],
-                values=np.asarray(np.hstack([np.asarray([replace_rule[i] for i in ug_array[:,0]]).reshape(-1,1),
-                 ug_array]), dtype=np.int32))
-            ctx.gradient_map = gradient_map            
+                values=np.asarray(
+                    np.hstack(
+                        [
+                            np.asarray(
+                                [replace_rule[i] for i in ug_array[:, 0]]
+                            ).reshape(-1, 1),
+                            ug_array,
+                        ]
+                    ),
+                    dtype=np.int32,
+                ),
+            )
+            ctx.gradient_map = gradient_map
         else:
-            do_gradients = False
             new_gradient_data = None
             new_gradient_samples = None
-            grad_samples_mapping = None        
-            
+
         ctx.structure_map = structure_map
         ctx.save_for_backward(values, gradient_data)
 
         return new_values, new_samples, new_gradient_data, new_gradient_samples, None
 
-    @staticmethod 
+    @staticmethod
     @profile
     def backward(
         ctx,
@@ -241,17 +308,27 @@ class SumStructuresCXAutograd(torch.autograd.Function):
         if values.requires_grad:
             grad_values = torch.vstack(
                 [
-                    grad_new_values[s, values.shape[1]*t:values.shape[1]*(t+1)] for s,t in zip(ctx.structure_map, ctx.species_slice)
-                ]).to(values.device) 
-            
+                    grad_new_values[s, values.shape[1] * t : values.shape[1] * (t + 1)]
+                    for s, t in zip(ctx.structure_map, ctx.species_slice)
+                ]
+            ).to(values.device)
+
         if gradient_data is not None and gradient_data.requires_grad:
-            grad_gradient_data = torch.stack([
-                grad_new_gradient_data[s, ..., gradient_data.shape[-1]*t:gradient_data.shape[-1]*(t+1)] for s,t in zip(ctx.gradient_map, ctx.gradient_slice)
-            ], axis=0).to(values.device) 
-            
+            grad_gradient_data = torch.stack(
+                [
+                    grad_new_gradient_data[
+                        s,
+                        ...,
+                        gradient_data.shape[-1] * t : gradient_data.shape[-1] * (t + 1),
+                    ]
+                    for s, t in zip(ctx.gradient_map, ctx.gradient_slice)
+                ],
+                axis=0,
+            ).to(values.device)
+
         return grad_values, None, grad_gradient_data, None, None
 
-    
+
 class SumStructures(torch.nn.Module):
     def __init__(self, sum_properties=False, explode_centers=None):
         super().__init__()
@@ -277,11 +354,8 @@ class SumStructures(torch.nn.Module):
             properties = block.properties
             if self.explode_centers is None:
                 output = SumStructuresAutograd.apply(
-                    block.values,
-                    block.samples,
-                    gradient_data,
-                    gradient_samples
-                )                
+                    block.values, block.samples, gradient_data, gradient_samples
+                )
                 values, samples, gradient_data, gradient_samples = output
             else:
                 output = SumStructuresCXAutograd.apply(
@@ -289,15 +363,30 @@ class SumStructures(torch.nn.Module):
                     block.samples,
                     gradient_data,
                     gradient_samples,
-                    self.explode_centers
+                    self.explode_centers,
                 )
                 pval = np.asarray(
-                    np.hstack([
-                    np.vstack([ properties.view(dtype=np.int32).reshape(properties.shape[0],-1) for e in self.explode_centers ]), np.asarray([[e]*len(properties) for e in self.explode_centers ]).reshape(-1,1)  ]) , dtype=np.int32)
-                plab = [ f"{p}_{e}" for p in properties.names for e in self.explode_centers ]                
-                properties = Labels(list(properties.names) + ["species_center"], pval )
+                    np.hstack(
+                        [
+                            np.vstack(
+                                [
+                                    properties.view(dtype=np.int32).reshape(
+                                        properties.shape[0], -1
+                                    )
+                                    for e in self.explode_centers
+                                ]
+                            ),
+                            np.asarray(
+                                [[e] * len(properties) for e in self.explode_centers]
+                            ).reshape(-1, 1),
+                        ]
+                    ),
+                    dtype=np.int32,
+                )
+
+                properties = Labels(list(properties.names) + ["species_center"], pval)
                 values, samples, gradient_data, gradient_samples, _ = output
-            
+
             new_block = TensorBlock(
                 values=values,
                 samples=Labels(["structure"], samples.reshape(-1, 1)),
