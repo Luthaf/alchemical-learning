@@ -7,16 +7,15 @@ from equistore import Labels, TensorBlock, TensorMap
 
 
 class CombineSpecies(torch.nn.Module):
-    def __init__(self, species, n_pseudo_species, *, explicit_combining_matrix=None):
+    def __init__(self, species, n_pseudo_species, *, per_l_max=0, explicit_combining_matrix=None):
         super().__init__()
-        coupling = _species_coupling_matrix(species)
-        pca = sklearn.decomposition.PCA(n_components=n_pseudo_species)
+        coupling = _species_coupling_matrix(species,n_pseudo_species)
 
         self.species_remapping = {species: i for i, species in enumerate(species)}
 
         if explicit_combining_matrix is None:
             self.combining_matrix = torch.nn.Parameter(
-                torch.tensor(pca.fit_transform(coupling))
+                torch.tensor(np.asarray([coupling]*(per_l_max+1)))
                 .contiguous()
                 .to(dtype=torch.get_default_dtype())
             )
@@ -27,6 +26,106 @@ class CombineSpecies(torch.nn.Module):
         return CombineSpecies(
             list(self.species_remapping.keys()),
             self.combining_matrix.shape[1],
+            explicit_combining_matrix=self.combining_matrix.clone().detach(),
+        )
+
+    def forward(self, spherical_expansion: TensorMap):
+        assert spherical_expansion.keys.names == ("spherical_harmonics_l",)
+        assert spherical_expansion.property_names == ("species_neighbor", "n")
+
+        l_channels, n_species, n_pseudo_species = self.combining_matrix.shape
+
+        blocks = []
+        for key, block in spherical_expansion:
+            l = key["spherical_harmonics_l"]
+            if l_channels==1:
+                combining_matrix = self.combining_matrix[0]
+            else: # l-dependent combination matrix 
+                combining_matrix = self.combining_matrix[l]
+            radial = np.unique(block.properties["n"])
+            n_radial = len(radial)
+            properties = Labels(
+                names=["species_neighbor", "n"],
+                values=np.array(
+                    [[-s, n] for s in range(n_pseudo_species) for n in radial],
+                    dtype=np.int32,
+                ),
+            )
+
+            n_samples, n_components, _ = block.values.shape
+            data = block.values.reshape(n_samples, n_components, n_species, n_radial)
+
+            data = data.swapaxes(-1, -2)
+            data = data @ combining_matrix
+
+            data = data.swapaxes(-1, -2)
+            data = data.reshape(n_samples, n_components, n_radial * n_pseudo_species)
+
+            new_block = TensorBlock(
+                values=data,
+                samples=block.samples,
+                components=block.components,
+                properties=properties,
+            )
+
+            if block.has_gradient("positions"):
+                gradient = block.gradient("positions")
+
+                n_grad_samples, n_cartesian, n_spherical, _ = gradient.data.shape
+
+                data = gradient.data.reshape(
+                    n_grad_samples,
+                    n_cartesian,
+                    n_spherical,
+                    n_species,
+                    n_radial,
+                )
+
+                data = data.swapaxes(-1, -2)
+                data = data @ combining_matrix
+
+                data = data.swapaxes(-1, -2)
+                data = data.reshape(
+                    n_grad_samples,
+                    n_cartesian,
+                    n_spherical,
+                    n_radial * n_pseudo_species,
+                )
+
+                new_block.add_gradient(
+                    "positions",
+                    data,
+                    gradient.samples,
+                    gradient.components,
+                )
+
+            blocks.append(new_block)
+
+        return TensorMap(spherical_expansion.keys, blocks)
+
+class CombineSpeciesPerCenter(torch.nn.Module):
+    # TODO: this does nothing ATM!
+    def __init__(self, species, n_pseudo_species, *, explicit_combining_matrix=None):
+        super().__init__()
+        coupling = _species_coupling_matrix(species)
+        pca = sklearn.decomposition.PCA(n_components=n_pseudo_species)
+
+        self.species_remapping = {species: i for i, species in enumerate(species)}
+
+        if explicit_combining_matrix is None:
+            combining_matrix = [pca.fit_transform(coupling)]*len(species)
+            self.combining_matrix = torch.nn.Parameter(
+                torch.tensor(combining_matrix)
+                .contiguous()
+                .to(dtype=torch.get_default_dtype())
+            )
+        else:
+            self.register_buffer("combining_matrix", explicit_combining_matrix)
+
+    def detach(self):
+        return CombineSpecies(
+            list(self.species_remapping.keys()),
+            self.combining_matrix.shape[-1],
             explicit_combining_matrix=self.combining_matrix.clone().detach(),
         )
 
@@ -98,13 +197,12 @@ class CombineSpecies(torch.nn.Module):
             blocks.append(new_block)
 
         return TensorMap(spherical_expansion.keys, blocks)
-
-
-def _species_coupling_matrix(species):
+    
+def _species_coupling_matrix(species, n_contracted):
     K = np.zeros((len(species), len(species)))
 
     SIGMA_EPSILON = 1.0
-    SIGMA_RADIUS = 1.0
+    SIGMA_RADIUS = 10.0
 
     for i, species_i in enumerate(species):
         constants_i = ATOMIC_DATA_PER_SPECIES[species_i]
@@ -121,7 +219,10 @@ def _species_coupling_matrix(species):
 
             K[i, j] = np.exp(-(a + b))
 
-    return K
+    eva, eve = np.linalg.eigh(K)
+    eve = eve[:,::-1]
+    print("Species mixing init with eigenvalues ", eva[-n_contracted:])
+    return eve[:,:n_contracted:].copy()
 
 
 AtomicData = namedtuple("AtomicData", ["symbol", "electronegativity", "radius"])
