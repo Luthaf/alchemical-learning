@@ -7,7 +7,6 @@ import torch
 from utils.dataset import AtomisticDataset, create_dataloader
 from utils.soap import PowerSpectrum
 from utils.combine import CombineRadial, CombineRadialSpecies, CombineSpecies
-from utils.dataset import AtomisticDataset, create_dataloader
 from mbmodel import CombinedPowerSpectrum, MultiBodyOrderModel
 
 torch.set_default_dtype(torch.float64)
@@ -73,14 +72,12 @@ class GenericMDCalculator:
             
         self.hypers = {}
         if "hypers_ps" in self.model_parameters:
-            self.hypers["spherical_expansion"] = self.model_parameters["hypers_ps"]
-            self.hypers["spherical_expansion"]["gradients"] = True
+            self.hypers["spherical_expansion"] = self.model_parameters["hypers_ps"]            
         if "hypers_rs" in self.model_parameters:
             self.hypers["radial_spectrum"] = self.model_parameters["hypers_rs"]
-            self.hypers["radial_spectrum"]["gradients"] = True
-            
+
         dataset_grad = AtomisticDataset(frames, all_species, self.hypers, energies, forces, 
-                                        normalization = train_normalization)
+                                        normalization = train_normalization, do_gradients=True)
         
         dataloader_grad = create_dataloader(
         dataset_grad,
@@ -156,7 +153,7 @@ class GenericMDCalculator:
         energies = torch.tensor([[0.]])
         forces =  [torch.tensor(np.zeros((len(frames[0]), 3)))]
         HYPERS =  self.hypers
-        dataset_grad = AtomisticDataset(frames, all_species,self.hypers, energies, forces)
+        dataset_grad = AtomisticDataset(frames, all_species,self.hypers, energies, forces, do_gradients=True)
         
         dataloader_grad = create_dataloader(
         dataset_grad,

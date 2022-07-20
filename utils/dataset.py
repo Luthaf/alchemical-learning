@@ -27,15 +27,15 @@ def _block_to_torch(block, structure_i):
 
     for parameter in block.gradients_list():
         gradient = block.gradient(parameter)
-
-        assert gradient.samples.names == ("sample", "structure", "atom")
+        
 
         gradient_samples = (
             gradient.samples.view(dtype=np.int32)
             .reshape(-1, len(gradient.samples.names))
             .copy()
         )
-        gradient_samples[:, 1] = structure_i
+        if gradient.samples.names == ("sample", "structure", "atom"):
+            gradient_samples[:, 1] = structure_i
         gradient_samples = Labels(gradient.samples.names, gradient_samples)
 
         new_block.add_gradient(
@@ -84,6 +84,7 @@ class AtomisticDataset(torch.utils.data.Dataset):
         energies,
         forces=None,
         normalization=None,
+        do_gradients=False,
     ):
         all_neighbor_species = Labels(
             names=["species_neighbor"],
@@ -94,6 +95,7 @@ class AtomisticDataset(torch.utils.data.Dataset):
             values=np.array(all_species, dtype=np.int32).reshape(-1, 1),
         )
 
+        self.do_gradients = do_gradients
         self.radial_spectrum = []
         hypers_radial_spectrum = copy.deepcopy(hypers.get("radial_spectrum", None))
         if hypers_radial_spectrum is not None:
@@ -104,7 +106,7 @@ class AtomisticDataset(torch.utils.data.Dataset):
             sph_norm = 0.0
             n_env = 0
             for frame_i, frame in enumerate(frames):
-                spherical_expansion = calculator.compute(frame)
+                spherical_expansion = calculator.compute(frame, gradients=(['positions', 'cell'] if do_gradients else []) )
                 spherical_expansion.keys_to_properties(all_center_species)
 
                 # TODO: these don't hurt, but are confusing, let's remove them
@@ -152,7 +154,7 @@ class AtomisticDataset(torch.utils.data.Dataset):
             for frame_i, frame in enumerate(frames):
                 spherical_expansion_by_l = {}
                 for l, calculator in calculators.items():
-                    spherical_expansion = calculator.compute(frame)
+                    spherical_expansion = calculator.compute(frame, gradients=(['positions', 'cell'] if do_gradients else []) )
                     spherical_expansion.keys_to_samples("species_center")
                     spherical_expansion.keys_to_properties(all_neighbor_species)
                     spherical_expansion_by_l[l] = spherical_expansion
@@ -165,7 +167,7 @@ class AtomisticDataset(torch.utils.data.Dataset):
             calculator = SphericalExpansion(**hypers_spherical_expansion)
 
             for frame_i, frame in enumerate(frames):
-                spherical_expansion = calculator.compute(frame)
+                spherical_expansion = calculator.compute(frame, gradients=(['positions', 'cell'] if do_gradients else []) ) 
                 spherical_expansion.keys_to_samples("species_center")
                 spherical_expansion.keys_to_properties(all_neighbor_species)
 

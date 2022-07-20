@@ -116,7 +116,7 @@ class PowerSpectrum(torch.nn.Module):
                     gradient_2.data,
                 ).reshape(gradients_samples.shape[0], 3, -1)
 
-                assert gradient_1.components[0].names == ("gradient_direction",)
+                assert gradient_1.components[0].names == ("direction",)
 
             soap_start = soap_stop
 
