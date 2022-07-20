@@ -151,6 +151,7 @@ def run_fit(datafile, parameters, device="cpu"):
             train_forces_e,
             train_forces_f,
             normalization=train_normalization,
+            do_gradients=True,
         )
         test_dataset_grad = AtomisticDataset(
             test_frames,
@@ -159,6 +160,7 @@ def run_fit(datafile, parameters, device="cpu"):
             test_energies,
             test_forces,
             normalization=train_normalization,
+            do_gradients=True,
         )
     else:
         train_forces_dataset_grad = train_forces_dataset
