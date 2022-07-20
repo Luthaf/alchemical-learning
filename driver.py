@@ -63,7 +63,6 @@ class GenericMDCalculator:
         
         pars_dict = self.model_parameters
         train_normalization =  pars_dict["normalization"] if "normalization" in pars_dict else None
-        do_restart = pars_dict["restart"] if "restart" in pars_dict else True # defaults to restart if file present
         rng_seed = pars_dict["seed"] if "seed" in pars_dict else None # defaults to random seed 
         per_center_ps = pars_dict["per_center_ps"] if "per_center_ps" in pars_dict else False
         per_l_combine = pars_dict["per_l_combine"] if "per_l_combine" in pars_dict else False 

@@ -103,6 +103,7 @@ def run_fit(datafile, parameters, device="cpu"):
         all_species.update(frame.numbers)
 
     all_species = list(map(lambda u: int(u), all_species))
+    print("All species ", all_species)
 
     print("Computing representations")
     train_dataset = AtomisticDataset(
@@ -142,9 +143,7 @@ def run_fit(datafile, parameters, device="cpu"):
     if do_gradients is True:
         print("Computing data with gradients")
         HYPERS_GRAD = copy.deepcopy(HYPERS_SMALL)
-        HYPERS_GRAD["gradients"] = do_gradients
         HYPERS_RAD_GRAD = copy.deepcopy(HYPERS_RADIAL)
-        HYPERS_RAD_GRAD["gradients"] = do_gradients
         train_forces_dataset_grad = AtomisticDataset(
             train_forces_frames,
             all_species,
