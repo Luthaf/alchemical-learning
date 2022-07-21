@@ -56,8 +56,10 @@ class PowerSpectrum(torch.nn.Module):
         assert spherical_expansion.keys.names == ("spherical_harmonics_l",)
 
         soap_start = 0
+        lmax = 0
         for (l,), spx_1 in spherical_expansion:
             soap_start += len(spx_1.properties) ** 2
+            lmax = max(l, lmax)
         data = torch.empty((len(spx_1.samples), soap_start), device=spx_1.values.device)
 
         if spx_1.has_gradient("positions"):
@@ -72,7 +74,8 @@ class PowerSpectrum(torch.nn.Module):
             + ["spherical_harmonics_l"]
         )
         properties_values = []
-        for (l,), spx_1 in spherical_expansion:
+        for l in range(lmax+1): # loops over l to ensure consistent order, independent on key storage
+            spx_1 = spherical_expansion.block(spherical_harmonics_l=l)
             spx_2 = spherical_expansion.block(spherical_harmonics_l=l)
 
             # with the same central species, we should have the same samples
