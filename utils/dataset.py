@@ -317,8 +317,9 @@ def _collate_tensor_map(tensors, device):
         grad_sample_names = tensors[0].block(0).gradient("positions").samples.names
     unique_keys = set()
     for tensor in tensors:
-        unique_keys.update(set(tensor.keys.tolist()))
+        unique_keys.update(set(tensor.keys.tolist()))            
     unique_keys = [tuple(k) for k in unique_keys]
+    unique_keys.sort()
     values_dict = {key: [] for key in unique_keys}
     samples_dict = {key: [] for key in unique_keys}
     properties_dict = {key: None for key in unique_keys}
@@ -326,6 +327,7 @@ def _collate_tensor_map(tensors, device):
     grad_values_dict = {key: [] for key in unique_keys}
     grad_samples_dict = {key: [] for key in unique_keys}
     grad_components_dict = {key: None for key in unique_keys}
+    
     for tensor in tensors:
         for key, block in tensor:
             key = tuple(key)
