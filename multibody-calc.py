@@ -58,7 +58,7 @@ def run_model(datafile, model_json, model_torch, device="cpu"):
 
     # --------- READING STUFF --------- #
     print("Reading file and properties")
-    test_frames = ase.io.read(datafile, f":10")
+    test_frames = ase.io.read(datafile, f"-10:")
 
     
     test_energies = (
@@ -84,12 +84,17 @@ def run_model(datafile, model_json, model_torch, device="cpu"):
         normalization=train_normalization,
     )
 
-
+    print(test_frames[0].numbers)
+    print("CHECK ", test_dataset.composition[0].block(0).values)
+    print(test_dataset.radial_spectrum[0].block(0).values.sum(axis=1))
+    print(test_dataset.spherical_expansions[0].block(2).values[0,0])
+    print(test_dataset.spherical_expansions[0].block(2).samples[0])
+        
     # --------- DATA LOADERS --------- #
     print("Creating data loaders")
     test_dataloader = create_dataloader(
         test_dataset,
-        batch_size=1,
+        batch_size=20,
         shuffle=False,
         device=device,
     )
@@ -105,10 +110,10 @@ def run_model(datafile, model_json, model_torch, device="cpu"):
         normalization=train_normalization,
         do_gradients=True
     )
-    
+    print("sph grad", test_dataset_grad.spherical_expansions[0].block(spherical_harmonics_l=2).values[0,0]) 
     test_dataloader_grad = create_dataloader(
         test_dataset_grad,
-        batch_size=1,
+        batch_size=2,
         shuffle=False,
         device=device,
     )
@@ -183,6 +188,8 @@ def run_model(datafile, model_json, model_torch, device="cpu"):
     except FileNotFoundError:
         print("Restart file not found")
 
+    for p in model.power_spectrum.combiner.parameters():
+        print("PS COMBINER ", p)
     with torch.no_grad():
         predicted = []
         reference = []
@@ -202,6 +209,15 @@ def run_model(datafile, model_json, model_torch, device="cpu"):
                 tspherical_expansions,
                 forward_forces=do_gradients,
             )
+            print("comp", tcomposition.block(0).values[0])
+            print(tspherical_expansions.block(2).samples[0])
+            print("sph", tspherical_expansions.block(spherical_harmonics_l=2).values[0,0])
+            comb = model.power_spectrum.combiner(tspherical_expansions)
+            print("comb", comb.block(spherical_harmonics_l=2).values[0,0])
+            print("samp", tspherical_expansions.block(spherical_harmonics_l=2).samples)
+            pwr = model.power_spectrum(tspherical_expansions)
+            print("PWR:", pwr.keys[0], pwr.block(0).values[0])
+            print("samp", pwr.block(0).samples)
             print(tenergies, tpredicted_e)
             predicted.append(tpredicted_e)
             if do_gradients:

@@ -439,7 +439,7 @@ def run_fit(datafile, parameters, device="cpu"):
                 )
 
             print(
-                f"Train loss: {(loss+loss_force).item()} E={loss.item()}, F={loss_force.item()}"
+                f"Train loss: {(loss+loss_force*force_weight).item()} E={loss.item()}, F={loss_force.item()}"
             )
             loss += loss_force * force_weight
             loss.backward(retain_graph=False)
