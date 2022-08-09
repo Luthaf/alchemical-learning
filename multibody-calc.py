@@ -60,7 +60,6 @@ def run_model(datafile, model_json, model_torch, device="cpu"):
     print("Reading file and properties")
     test_frames = ase.io.read(datafile, f"-10:")
 
-    
     test_energies = (
         torch.tensor([frame.info["energy"] for frame in test_frames])
         .reshape(-1, 1)
@@ -70,9 +69,34 @@ def run_model(datafile, model_json, model_torch, device="cpu"):
         torch.tensor(frame.arrays["forces"]).to(dtype=torch.get_default_dtype())
         for frame in test_frames
     ]
-    
-    all_species = [21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 39, 40, 41, 42, 44,
- 45, 46, 47, 71, 72, 73, 74, 77, 78, 79]
+
+    all_species = [
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        39,
+        40,
+        41,
+        42,
+        44,
+        45,
+        46,
+        47,
+        71,
+        72,
+        73,
+        74,
+        77,
+        78,
+        79,
+    ]
 
     print("Computing representations")
     test_dataset = AtomisticDataset(
@@ -87,9 +111,9 @@ def run_model(datafile, model_json, model_torch, device="cpu"):
     print(test_frames[0].numbers)
     print("CHECK ", test_dataset.composition[0].block(0).values)
     print(test_dataset.radial_spectrum[0].block(0).values.sum(axis=1))
-    print(test_dataset.spherical_expansions[0].block(2).values[0,0])
+    print(test_dataset.spherical_expansions[0].block(2).values[0, 0])
     print(test_dataset.spherical_expansions[0].block(2).samples[0])
-        
+
     # --------- DATA LOADERS --------- #
     print("Creating data loaders")
     test_dataloader = create_dataloader(
@@ -108,9 +132,14 @@ def run_model(datafile, model_json, model_torch, device="cpu"):
         test_energies,
         test_forces,
         normalization=train_normalization,
-        do_gradients=True
+        do_gradients=True,
     )
-    print("sph grad", test_dataset_grad.spherical_expansions[0].block(spherical_harmonics_l=2).values[0,0]) 
+    print(
+        "sph grad",
+        test_dataset_grad.spherical_expansions[0]
+        .block(spherical_harmonics_l=2)
+        .values[0, 0],
+    )
     test_dataloader_grad = create_dataloader(
         test_dataset_grad,
         batch_size=2,
@@ -211,9 +240,11 @@ def run_model(datafile, model_json, model_torch, device="cpu"):
             )
             print("comp", tcomposition.block(0).values[0])
             print(tspherical_expansions.block(2).samples[0])
-            print("sph", tspherical_expansions.block(spherical_harmonics_l=2).values[0,0])
+            print(
+                "sph", tspherical_expansions.block(spherical_harmonics_l=2).values[0, 0]
+            )
             comb = model.power_spectrum.combiner(tspherical_expansions)
-            print("comb", comb.block(spherical_harmonics_l=2).values[0,0])
+            print("comb", comb.block(spherical_harmonics_l=2).values[0, 0])
             print("samp", tspherical_expansions.block(spherical_harmonics_l=2).samples)
             pwr = model.power_spectrum(tspherical_expansions)
             print("PWR:", pwr.keys[0], pwr.block(0).values[0])
@@ -241,6 +272,7 @@ def run_model(datafile, model_json, model_torch, device="cpu"):
         + (f" test mae force={f_test_mae:.4}")
     )
 
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="""This tool fits a potential for a multi-component system using an alchemical mixture model.
@@ -248,7 +280,6 @@ if __name__ == "__main__":
              python multibody-force.py datafile.xyz parameters_file [-d device]
         """
     )
-
 
     parser.add_argument(
         "model_json",

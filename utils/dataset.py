@@ -27,7 +27,6 @@ def _block_to_torch(block, structure_i):
 
     for parameter in block.gradients_list():
         gradient = block.gradient(parameter)
-        
 
         gradient_samples = (
             gradient.samples.view(dtype=np.int32)
@@ -106,7 +105,9 @@ class AtomisticDataset(torch.utils.data.Dataset):
             sph_norm = 0.0
             n_env = 0
             for frame_i, frame in enumerate(frames):
-                spherical_expansion = calculator.compute(frame, gradients=(['positions', 'cell'] if do_gradients else []) )
+                spherical_expansion = calculator.compute(
+                    frame, gradients=(["positions", "cell"] if do_gradients else [])
+                )
                 spherical_expansion.keys_to_properties(all_center_species)
 
                 # TODO: these don't hurt, but are confusing, let's remove them
@@ -154,7 +155,9 @@ class AtomisticDataset(torch.utils.data.Dataset):
             for frame_i, frame in enumerate(frames):
                 spherical_expansion_by_l = {}
                 for l, calculator in calculators.items():
-                    spherical_expansion = calculator.compute(frame, gradients=(['positions', 'cell'] if do_gradients else []) )
+                    spherical_expansion = calculator.compute(
+                        frame, gradients=(["positions", "cell"] if do_gradients else [])
+                    )
                     spherical_expansion.keys_to_samples("species_center")
                     spherical_expansion.keys_to_properties(all_neighbor_species)
                     spherical_expansion_by_l[l] = spherical_expansion
@@ -167,7 +170,9 @@ class AtomisticDataset(torch.utils.data.Dataset):
             calculator = SphericalExpansion(**hypers_spherical_expansion)
 
             for frame_i, frame in enumerate(frames):
-                spherical_expansion = calculator.compute(frame, gradients=(['positions', 'cell'] if do_gradients else []) ) 
+                spherical_expansion = calculator.compute(
+                    frame, gradients=(["positions", "cell"] if do_gradients else [])
+                )
                 spherical_expansion.keys_to_samples("species_center")
                 spherical_expansion.keys_to_properties(all_neighbor_species)
 
@@ -317,7 +322,7 @@ def _collate_tensor_map(tensors, device):
         grad_sample_names = tensors[0].block(0).gradient("positions").samples.names
     unique_keys = set()
     for tensor in tensors:
-        unique_keys.update(set(tensor.keys.tolist()))            
+        unique_keys.update(set(tensor.keys.tolist()))
     unique_keys = [tuple(k) for k in unique_keys]
     unique_keys.sort()
     values_dict = {key: [] for key in unique_keys}
@@ -327,7 +332,7 @@ def _collate_tensor_map(tensors, device):
     grad_values_dict = {key: [] for key in unique_keys}
     grad_samples_dict = {key: [] for key in unique_keys}
     grad_components_dict = {key: None for key in unique_keys}
-    
+
     for tensor in tensors:
         for key, block in tensor:
             key = tuple(key)

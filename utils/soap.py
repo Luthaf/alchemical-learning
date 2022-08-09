@@ -74,7 +74,9 @@ class PowerSpectrum(torch.nn.Module):
             + ["spherical_harmonics_l"]
         )
         properties_values = []
-        for l in range(lmax+1): # loops over l to ensure consistent order, independent on key storage
+        for l in range(
+            lmax + 1
+        ):  # loops over l to ensure consistent order, independent on key storage
             spx_1 = spherical_expansion.block(spherical_harmonics_l=l)
             spx_2 = spherical_expansion.block(spherical_harmonics_l=l)
 

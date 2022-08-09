@@ -12,10 +12,36 @@ from mbmodel import CombinedPowerSpectrum, MultiBodyOrderModel
 torch.set_default_dtype(torch.float64)
 
 
-device = 'cpu'
+device = "cpu"
 
-all_species = [21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 39, 40, 41, 42, 44,
- 45, 46, 47, 71, 72, 73, 74, 77, 78, 79]
+all_species = [
+    21,
+    22,
+    23,
+    24,
+    25,
+    26,
+    27,
+    28,
+    29,
+    30,
+    39,
+    40,
+    41,
+    42,
+    44,
+    45,
+    46,
+    47,
+    71,
+    72,
+    73,
+    74,
+    77,
+    78,
+    79,
+]
+
 
 class GenericMDCalculator:
 
@@ -29,10 +55,15 @@ class GenericMDCalculator:
     )
 
     def __init__(
-        self, model_state_path, model_parameters_path, is_periodic, structure_template=None, atomic_numbers=None
+        self,
+        model_state_path,
+        model_parameters_path,
+        is_periodic,
+        structure_template=None,
+        atomic_numbers=None,
     ):
         super().__init__()
-        #self.model = torch.load(model_pt)
+        # self.model = torch.load(model_pt)
         # Structure initialization
         self.is_periodic = is_periodic
 
@@ -53,64 +84,107 @@ class GenericMDCalculator:
             raise ValueError(
                 "Must specify one of 'structure_template' or 'atomic_numbers'"
             )
-        
+
         frames = [self.atoms]
         print(len(self.atoms))
-        energies = torch.tensor([[0.]])
-        forces =  [torch.tensor(np.zeros((len(frames[0]), 3)))]
+        energies = torch.tensor([[0.0]])
+        forces = [torch.tensor(np.zeros((len(frames[0]), 3)))]
 
-        self.model_parameters = json.load(open(model_parameters_path),  object_hook=lambda d: {int(k) if k.lstrip('-').isdigit() else k: v for k, v in d.items()})
-        
+        self.model_parameters = json.load(
+            open(model_parameters_path),
+            object_hook=lambda d: {
+                int(k) if k.lstrip("-").isdigit() else k: v for k, v in d.items()
+            },
+        )
+
         pars_dict = self.model_parameters
-        train_normalization =  pars_dict["normalization"] if "normalization" in pars_dict else None
-        rng_seed = pars_dict["seed"] if "seed" in pars_dict else None # defaults to random seed 
-        per_center_ps = pars_dict["per_center_ps"] if "per_center_ps" in pars_dict else False
-        per_l_combine = pars_dict["per_l_combine"] if "per_l_combine" in pars_dict else False 
-        N_PSEUDO_SPECIES = pars_dict["n_pseudo_species"]  if "n_pseudo_species" in pars_dict else 4
- 
-            
+        train_normalization = (
+            pars_dict["normalization"] if "normalization" in pars_dict else None
+        )
+        rng_seed = (
+            pars_dict["seed"] if "seed" in pars_dict else None
+        )  # defaults to random seed
+        per_center_ps = (
+            pars_dict["per_center_ps"] if "per_center_ps" in pars_dict else False
+        )
+        per_l_combine = (
+            pars_dict["per_l_combine"] if "per_l_combine" in pars_dict else False
+        )
+        N_PSEUDO_SPECIES = (
+            pars_dict["n_pseudo_species"] if "n_pseudo_species" in pars_dict else 4
+        )
+
         self.hypers = {}
         if "hypers_ps" in self.model_parameters:
-            self.hypers["spherical_expansion"] = self.model_parameters["hypers_ps"]            
+            self.hypers["spherical_expansion"] = self.model_parameters["hypers_ps"]
         if "hypers_rs" in self.model_parameters:
             self.hypers["radial_spectrum"] = self.model_parameters["hypers_rs"]
 
-        dataset_grad = AtomisticDataset(frames, all_species, self.hypers, energies, forces, 
-                                        normalization = train_normalization, do_gradients=True)
-        
+        dataset_grad = AtomisticDataset(
+            frames,
+            all_species,
+            self.hypers,
+            energies,
+            forces,
+            normalization=train_normalization,
+            do_gradients=True,
+        )
+
         dataloader_grad = create_dataloader(
-        dataset_grad,
-        batch_size=1,
-        shuffle=False,
-        device=device,
+            dataset_grad,
+            batch_size=1,
+            shuffle=False,
+            device=device,
         )
         TORCH_REGULARIZER = 1e-2
         LINALG_REGULARIZER_ENERGIES = 1e-2
         LINALG_REGULARIZER_FORCES = 1e-1
 
-        combiner = CombineSpecies(species=all_species, n_pseudo_species=N_PSEUDO_SPECIES, per_l_max=(self.hypers["spherical_expansion"]['max_angular'] if per_l_combine else 0))
-
-        power_spectrum = CombinedPowerSpectrum(combiner)        
-        self.model = MultiBodyOrderModel(
-            power_spectrum=power_spectrum, 
-            composition_regularizer=[1e-10],
-            radial_spectrum_regularizer=[LINALG_REGULARIZER_ENERGIES, LINALG_REGULARIZER_FORCES],
-            power_spectrum_regularizer=[LINALG_REGULARIZER_ENERGIES, LINALG_REGULARIZER_FORCES],
-            optimizable_weights=True, 
-            random_initial_weights=True,
-            ps_center_types=(all_species if per_center_ps else None)
+        combiner = CombineSpecies(
+            species=all_species,
+            n_pseudo_species=N_PSEUDO_SPECIES,
+            per_l_max=(
+                self.hypers["spherical_expansion"]["max_angular"]
+                if per_l_combine
+                else 0
+            ),
         )
-        
+
+        power_spectrum = CombinedPowerSpectrum(combiner)
+        self.model = MultiBodyOrderModel(
+            power_spectrum=power_spectrum,
+            composition_regularizer=[1e-10],
+            radial_spectrum_regularizer=[
+                LINALG_REGULARIZER_ENERGIES,
+                LINALG_REGULARIZER_FORCES,
+            ],
+            power_spectrum_regularizer=[
+                LINALG_REGULARIZER_ENERGIES,
+                LINALG_REGULARIZER_FORCES,
+            ],
+            optimizable_weights=True,
+            random_initial_weights=True,
+            ps_center_types=(all_species if per_center_ps else None),
+        )
+
         self.model.to(device=device, dtype=torch.get_default_dtype())
 
         # initialize the model
         with torch.no_grad():
-            for composition, radial_spectrum, spherical_expansions, energies, forces in dataloader_grad:
+            for (
+                composition,
+                radial_spectrum,
+                spherical_expansions,
+                energies,
+                forces,
+            ) in dataloader_grad:
                 # we want to intially train the model on all frames, to ensure the
                 # support points come from the full dataset.
-                self.model.initialize_model_weights(composition, radial_spectrum, spherical_expansions, energies, forces)
-        
-        #modelfilename = "/home/lopanits/chemlearning/alchemical-learning/model_state_dict/CombinedLinearModel-4-mixed-100-train-100-test-4-max_ang-8-max_rad-0.3-sigma-4.0-cutoff-4-species-opt-weights-random-weights/1-epoch.pt"
+                self.model.initialize_model_weights(
+                    composition, radial_spectrum, spherical_expansions, energies, forces
+                )
+
+        # modelfilename = "/home/lopanits/chemlearning/alchemical-learning/model_state_dict/CombinedLinearModel-4-mixed-100-train-100-test-4-max_ang-8-max_rad-0.3-sigma-4.0-cutoff-4-species-opt-weights-random-weights/1-epoch.pt"
         self.model.load_state_dict(torch.load(model_state_path, map_location=device))
         self.model.eval()
 
@@ -147,22 +221,32 @@ class GenericMDCalculator:
 
         # Compute representations and evaluate model
         ## TODO compute spherical expansion here
-        ## TODO convert between numpy and pytroch 
+        ## TODO convert between numpy and pytroch
         frames = [self.atoms]
-        energies = torch.tensor([[0.]])
-        forces =  [torch.tensor(np.zeros((len(frames[0]), 3)))]
-        HYPERS =  self.hypers
-        dataset_grad = AtomisticDataset(frames, all_species,self.hypers, energies, forces, do_gradients=True)
-        
-        dataloader_grad = create_dataloader(
-        dataset_grad,
-        batch_size=1,
-        shuffle=False,
-        device=device,
+        energies = torch.tensor([[0.0]])
+        forces = [torch.tensor(np.zeros((len(frames[0]), 3)))]
+        HYPERS = self.hypers
+        dataset_grad = AtomisticDataset(
+            frames, all_species, self.hypers, energies, forces, do_gradients=True
         )
-        
-        for composition, radial_spectrum, spherical_expansions, energies, forces in dataloader_grad:
-            energy_torch, forces_torch = self.model(composition, radial_spectrum, spherical_expansions, forward_forces=True)
+
+        dataloader_grad = create_dataloader(
+            dataset_grad,
+            batch_size=1,
+            shuffle=False,
+            device=device,
+        )
+
+        for (
+            composition,
+            radial_spectrum,
+            spherical_expansions,
+            energies,
+            forces,
+        ) in dataloader_grad:
+            energy_torch, forces_torch = self.model(
+                composition, radial_spectrum, spherical_expansions, forward_forces=True
+            )
         energy = energy_torch.detach().numpy().flatten()
         forces = forces_torch.detach().numpy().flatten()
         stress_matrix = np.zeros((3, 3))
