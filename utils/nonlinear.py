@@ -68,4 +68,6 @@ class NNModel(torch.nn.Module):
             nn_per_atom_forces = -torch.sum(ps_tensor_grad*nn_grads[0][gradient_map][:, None, :], -1)
             new_gradient_data.index_add_(0, gradient_map, nn_per_atom_forces[:,:,None])
             forces = new_gradient_data.reshape(-1,3)
+        else:
+            forces = None
         return energies, forces

@@ -36,6 +36,10 @@ def run_fit(datafile, parameters, device="cpu"):
     prefix = pars_dict["prefix"]
 
     N_COMBINED = pars_dict["n_mixed_basis"] if "n_mixed_basis" in pars_dict else 0
+    nn_layer_size = (
+        pars_dict["layer_size"] if "layer_size" in pars_dict else 0
+    )  # defaults to restart if file present
+    
     train_normalization = (
         pars_dict["normalization"] if "normalization" in pars_dict else None
     )
@@ -285,6 +289,7 @@ def run_fit(datafile, parameters, device="cpu"):
         ],
         optimizable_weights=True,
         random_initial_weights=True,
+        nn_layer_size=nn_layer_size,
         ps_center_types=(all_species if per_center_ps else None),
     )
 
@@ -491,7 +496,7 @@ def run_fit(datafile, parameters, device="cpu"):
                     else model.power_spectrum_model.weights.grad.detach().cpu().numpy()
                 ),
             )
-            with torch.no_grad():
+            if True:  #with torch.no_grad(): ### this interferes with the autograd force calculator
                 predicted = []
                 reference = []
                 f_predicted = []
@@ -534,14 +539,14 @@ def run_fit(datafile, parameters, device="cpu"):
             )
             np.savetxt(
                 f"{filename}-energy_test.dat",
-                np.hstack([reference.cpu().numpy(), predicted.cpu().numpy()]),
+                np.hstack([reference.cpu().detach().numpy(), predicted.cpu().detach().numpy()]),
             )
             np.savetxt(
                 f"{filename}-force_test.dat",
                 np.hstack(
                     [
-                        f_reference.cpu().numpy().reshape(-1, 1),
-                        f_predicted.cpu().numpy().reshape(-1, 1),
+                        f_reference.cpu().detach().numpy().reshape(-1, 1),
+                        f_predicted.cpu().detach().numpy().reshape(-1, 1),
                     ]
                 ),
             )
@@ -553,7 +558,7 @@ def run_fit(datafile, parameters, device="cpu"):
 
     torch.save(model.state_dict(), f"{filename}_{now}-final.torch")
 
-    with torch.no_grad():
+    if True: #with torch.no_grad():
         tpredicted = []
         treference = []
         for (

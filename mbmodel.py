@@ -1,6 +1,7 @@
 import torch
 
 from utils.linear import LinearModel
+from utils.nonlinear import NNModel
 from utils.operations import SumStructures, remove_gradient
 from utils.soap import PowerSpectrum
 
@@ -40,6 +41,7 @@ class MultiBodyOrderModel(torch.nn.Module):
         power_spectrum_regularizer,
         optimizable_weights,
         random_initial_weights,
+        nn_layer_size=0,
         # list of atomic types to explode the power spectrum. None to use same
         # model for all centers (default)
         ps_center_types=None,
@@ -77,7 +79,11 @@ class MultiBodyOrderModel(torch.nn.Module):
                 optimizable_weights=optimizable_weights,
                 random_initial_weights=random_initial_weights,
             )
-
+            if nn_layer_size==0:
+                self.nn = None
+            else:
+                self.nn = NNModel(nn_layer_size)
+        
         self.optimizable_weights = optimizable_weights
         self.random_initial_weights = random_initial_weights
 
@@ -132,6 +138,14 @@ class MultiBodyOrderModel(torch.nn.Module):
                     forces = forces_ps
                 else:
                     forces += forces_ps
+            
+            if self.nn is not None:
+                nn_energies, nn_forces = self.nn(power_spectrum, with_forces=forward_forces)
+                energies += nn_energies
+                if forces is None:
+                    forces = nn_forces
+                else:
+                    forces += nn_forces
 
         return energies, forces
 
@@ -167,3 +181,5 @@ class MultiBodyOrderModel(torch.nn.Module):
             self.power_spectrum_model.initialize_model_weights(
                 power_spectrum_per_structure, energies, forces, seed
             )
+            if self.nn is not None:
+                self.nn.initialize_model_weights(power_spectrum, energies, forces)
