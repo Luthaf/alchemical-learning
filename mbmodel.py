@@ -80,10 +80,11 @@ class MultiBodyOrderModel(torch.nn.Module):
                 random_initial_weights=random_initial_weights,
             )
             if nn_layer_size==0:
-                self.nn = None
+                self.nn_model = None
             else:
-                self.nn = NNModel(nn_layer_size)
-        
+                self.nn_model = NNModel(nn_layer_size)
+
+        self.latest_energies = {}
         self.optimizable_weights = optimizable_weights
         self.random_initial_weights = random_initial_weights
 
@@ -97,10 +98,12 @@ class MultiBodyOrderModel(torch.nn.Module):
             if radial_spectrum is not None:
                 radial_spectrum = remove_gradient(radial_spectrum)
 
+        self.latest_energies = {}
         energies, forces = None, None
 
         if self.composition_model is not None:
             energies_cmp, _ = self.composition_model(composition)
+            self.latest_energies['composition'] = energies_cmp
             energies = energies_cmp
             forces = None
 
@@ -116,6 +119,9 @@ class MultiBodyOrderModel(torch.nn.Module):
                 energies = energies_rs
             else:
                 energies += energies_rs
+            
+            self.latest_energies['radial'] = energies_rs
+
             if forces_rs is not None:
                 if forces is None:
                     forces = forces_rs
@@ -133,15 +139,20 @@ class MultiBodyOrderModel(torch.nn.Module):
                 energies = energies_ps
             else:
                 energies += energies_ps
+            
+            self.latest_energies['power'] = energies_ps
+
             if forces_ps is not None:
                 if forces is None:
                     forces = forces_ps
                 else:
                     forces += forces_ps
             
-            if self.nn is not None:
-                nn_energies, nn_forces = self.nn(power_spectrum, with_forces=forward_forces)
+            if self.nn_model is not None:
+                nn_energies, nn_forces = self.nn_model(power_spectrum, with_forces=forward_forces)
                 energies += nn_energies
+                self.latest_energies['nn'] = nn_energies
+
                 if forces is None:
                     forces = nn_forces
                 else:
@@ -181,5 +192,5 @@ class MultiBodyOrderModel(torch.nn.Module):
             self.power_spectrum_model.initialize_model_weights(
                 power_spectrum_per_structure, energies, forces, seed
             )
-            if self.nn is not None:
-                self.nn.initialize_model_weights(power_spectrum, energies, forces)
+            if self.nn_model is not None:
+                self.nn_model.initialize_model_weights(power_spectrum, energies, forces)

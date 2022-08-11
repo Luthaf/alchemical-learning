@@ -46,6 +46,7 @@ def run_fit(datafile, parameters, device="cpu"):
     do_restart = (
         pars_dict["restart"] if "restart" in pars_dict else True
     )  # defaults to restart if file present
+    n_epochs_total = pars_dict["n_epochs_total"] if "n_epochs_total" in pars_dict else 0
     rng_seed = (
         pars_dict["seed"] if "seed" in pars_dict else None
     )  # defaults to random seed
@@ -209,7 +210,7 @@ def run_fit(datafile, parameters, device="cpu"):
 
     test_dataloader = create_dataloader(
         test_dataset,
-        batch_size=200,
+        batch_size=1000,
         shuffle=False,
         device=device,
     )
@@ -238,7 +239,7 @@ def run_fit(datafile, parameters, device="cpu"):
 
         test_dataloader_grad = create_dataloader(
             test_dataset_grad,
-            batch_size=50,
+            batch_size=1000,
             shuffle=False,
             device=device,
         )
@@ -297,6 +298,7 @@ def run_fit(datafile, parameters, device="cpu"):
         TORCH_REGULARIZER_COMPOSITION = pars_dict["regularizer_x"]
         TORCH_REGULARIZER_RADIAL_SPECTRUM = pars_dict["regularizer_rs"]
         TORCH_REGULARIZER_POWER_SPECTRUM = pars_dict["regularizer_ps"]
+        TORCH_REGULARIZER_NN = pars_dict["regularizer_nn"]
     else:
         TORCH_REGULARIZER_RADIAL_SPECTRUM = 0.0
         TORCH_REGULARIZER_POWER_SPECTRUM = 0.0
@@ -378,7 +380,8 @@ def run_fit(datafile, parameters, device="cpu"):
             f_forces,
         ) = next(iter(train_forces_dataloader_grad_no_batch))
         del train_forces_dataset
-    for epoch in range(n_epochs):
+    best_mae = 1e100
+    for epoch in range(n_epochs_total, n_epochs):
         print("Beginning epoch", epoch)
         epoch_start = time.time()
 
@@ -442,6 +445,8 @@ def run_fit(datafile, parameters, device="cpu"):
                 loss += TORCH_REGULARIZER_POWER_SPECTRUM * torch.linalg.norm(
                     model.power_spectrum_model.weights
                 )
+            if model.nn_model is not None:
+                loss += TORCH_REGULARIZER_NN * sum((p**2).sum() for p in model.nn_model.parameters())
 
             print(
                 f"Train loss: {(loss+loss_force*force_weight).item()} E={loss.item()}, F={loss_force.item()}"
@@ -497,6 +502,28 @@ def run_fit(datafile, parameters, device="cpu"):
                 ),
             )
             if True:  #with torch.no_grad(): ### this interferes with the autograd force calculator
+                # train set errors
+                if high_mem:
+                    predicted, _ = model(
+                        composition,
+                        radial_spectrum,
+                        spherical_expansions,
+                        forward_forces=False,
+                    )   
+                    train_mae = loss_mae(predicted, energies)
+                    f_predicted_e, f_predicted_f = model(
+                        f_composition,
+                        f_radial_spectrum,
+                        f_spherical_expansions,
+                        forward_forces=do_gradients,
+                    )
+                    train_mae += loss_mae(f_predicted_e, f_energies)                    
+                    train_mae /= n_train + n_train_forces
+                    if do_gradients:
+                        train_f_mae = loss_mae(f_predicted_f, f_forces) / (3*42) / n_train_forces
+                else:
+                    train_mae, train_f_mae = 0,0
+
                 predicted = []
                 reference = []
                 f_predicted = []
@@ -519,6 +546,9 @@ def run_fit(datafile, parameters, device="cpu"):
                     if do_gradients:
                         f_predicted.append(tpredicted_f)
                         f_reference.append(tforces)
+                print("Energy component stats (mean absolute values over last test batch)")
+                for k in model.latest_energies:
+                    print(k, ":  ", model.latest_energies[k].detach().abs().mean().item())
 
                 reference = torch.vstack(reference)
                 predicted = torch.vstack(predicted)
@@ -527,7 +557,7 @@ def run_fit(datafile, parameters, device="cpu"):
                 if do_gradients:
                     f_reference = torch.vstack(f_reference)
                     f_predicted = torch.vstack(f_predicted)
-                    f_test_mae = loss_mae(f_predicted, f_reference) / n_test / 42
+                    f_test_mae = loss_mae(f_predicted, f_reference) / n_test / (3*42)
                     output.write(f"{f_test_mae}")
                 output.write("\n")
                 output.flush()
@@ -550,6 +580,14 @@ def run_fit(datafile, parameters, device="cpu"):
                     ]
                 ),
             )
+            if test_mae < best_mae:
+                best_mae = test_mae
+                torch.save(
+                    model.state_dict(), f"{filename}-restart.torch"
+                )  # no NOW string so we can restart but keep track of initial and final files
+
+
+
         del loss
         n_epochs_total += 1
         torch.save(

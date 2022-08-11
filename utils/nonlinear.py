@@ -39,7 +39,6 @@ class NNModel(torch.nn.Module):
                                         create_graph=True)
             ps_gradient = descriptor.block().gradient("positions")
             ps_tensor_grad = ps_gradient.data.reshape(-1, 3, ps_tensor.shape[-1])
-            print("grad shape", ps_tensor_grad.shape, ps_tensor.shape, nn_grads[0].shape)                
             
             gradient_samples_Aj = np.asarray(
                 ps_gradient.samples[["structure", "atom"]], dtype=tuple
