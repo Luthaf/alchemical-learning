@@ -210,7 +210,7 @@ def run_fit(datafile, parameters, device="cpu"):
 
     test_dataloader = create_dataloader(
         test_dataset,
-        batch_size=1000,
+        batch_size=50,
         shuffle=False,
         device=device,
     )
@@ -239,7 +239,7 @@ def run_fit(datafile, parameters, device="cpu"):
 
         test_dataloader_grad = create_dataloader(
             test_dataset_grad,
-            batch_size=1000,
+            batch_size=50,
             shuffle=False,
             device=device,
         )
@@ -274,34 +274,21 @@ def run_fit(datafile, parameters, device="cpu"):
 
     power_spectrum = CombinedPowerSpectrum(combiner)
 
-    LINALG_REGULARIZER_ENERGIES = 1e-2
-    LINALG_REGULARIZER_FORCES = 1e-1
+    TORCH_REGULARIZER_COMPOSITION = pars_dict["regularizer_x"] if "regularizer_x" in pars_dict else None
+    TORCH_REGULARIZER_RADIAL_SPECTRUM = pars_dict["regularizer_rs"]  if "regularizer_rs" in pars_dict else None
+    TORCH_REGULARIZER_POWER_SPECTRUM = pars_dict["regularizer_ps"]  if "regularizer_ps" in pars_dict else None
+    TORCH_REGULARIZER_NN = pars_dict["regularizer_nn"] if "regularizer_nn" in pars_dict else None
 
     model = MultiBodyOrderModel(
         power_spectrum=power_spectrum,
-        composition_regularizer=[1e-10],
-        radial_spectrum_regularizer=[
-            LINALG_REGULARIZER_ENERGIES,
-            LINALG_REGULARIZER_FORCES,
-        ],
-        power_spectrum_regularizer=[
-            LINALG_REGULARIZER_ENERGIES,
-            LINALG_REGULARIZER_FORCES,
-        ],
+        composition_regularizer=TORCH_REGULARIZER_COMPOSITION,
+        radial_spectrum_regularizer=TORCH_REGULARIZER_RADIAL_SPECTRUM,
+        power_spectrum_regularizer=TORCH_REGULARIZER_POWER_SPECTRUM,
         optimizable_weights=True,
         random_initial_weights=True,
         nn_layer_size=nn_layer_size,
         ps_center_types=(all_species if per_center_ps else None),
     )
-
-    if model.optimizable_weights:
-        TORCH_REGULARIZER_COMPOSITION = pars_dict["regularizer_x"]
-        TORCH_REGULARIZER_RADIAL_SPECTRUM = pars_dict["regularizer_rs"]
-        TORCH_REGULARIZER_POWER_SPECTRUM = pars_dict["regularizer_ps"]
-        TORCH_REGULARIZER_NN = pars_dict["regularizer_nn"]
-    else:
-        TORCH_REGULARIZER_RADIAL_SPECTRUM = 0.0
-        TORCH_REGULARIZER_POWER_SPECTRUM = 0.0
 
     model.to(device=device, dtype=torch.get_default_dtype())
 
@@ -361,8 +348,6 @@ def run_fit(datafile, parameters, device="cpu"):
 
     output = open(f"{filename}_{now}.dat", "w")
     output.write("# epoch  train_loss  test_mae test_mae_f\n")
-    n_epochs_total = 0
-
     torch.save(model.state_dict(), f"{filename}_{now}-init.torch")
 
     assert model.optimizable_weights
@@ -438,6 +423,7 @@ def run_fit(datafile, parameters, device="cpu"):
                     model.composition_model.weights
                 )
             if model.radial_spectrum_model is not None:
+                print(model.radial_spectrum_model)
                 loss += TORCH_REGULARIZER_RADIAL_SPECTRUM * torch.linalg.norm(
                     model.radial_spectrum_model.weights
                 )
@@ -453,10 +439,6 @@ def run_fit(datafile, parameters, device="cpu"):
             )
             loss += loss_force * force_weight
             loss.backward(retain_graph=False)
-            print(
-                "Loss gradient",
-                np.linalg.norm(model.composition_model.weights.grad.numpy()),
-            )
             return loss
 
         loss = optimizer.step(single_step)
@@ -520,9 +502,15 @@ def run_fit(datafile, parameters, device="cpu"):
                     train_mae += loss_mae(f_predicted_e, f_energies)                    
                     train_mae /= n_train + n_train_forces
                     if do_gradients:
-                        train_f_mae = loss_mae(f_predicted_f, f_forces) / (3*42) / n_train_forces
+                        f_train_mae = loss_mae(f_predicted_f, f_forces) / (3*42) / n_train_forces
+                    print("Energy component stats (mean absolute values over last test batch)")
+                    for k in model.latest_energies:
+                        print(k, ":  ", model.latest_energies[k].detach().abs().mean().item())
+                    print("Energy component stats (mean absolute values over last test batch)")
+                    for k in model.latest_forces:
+                        print(k, ":  ", model.latest_forces[k].detach().abs().mean().item())
                 else:
-                    train_mae, train_f_mae = 0,0
+                    train_mae, f_train_mae = 0,0
 
                 predicted = []
                 reference = []
@@ -546,9 +534,6 @@ def run_fit(datafile, parameters, device="cpu"):
                     if do_gradients:
                         f_predicted.append(tpredicted_f)
                         f_reference.append(tforces)
-                print("Energy component stats (mean absolute values over last test batch)")
-                for k in model.latest_energies:
-                    print(k, ":  ", model.latest_energies[k].detach().abs().mean().item())
 
                 reference = torch.vstack(reference)
                 predicted = torch.vstack(predicted)
@@ -565,8 +550,12 @@ def run_fit(datafile, parameters, device="cpu"):
             f_all_tests.append(f_test_mae.item())
             print(
                 f"epoch {n_epochs_total} took {epoch_time:.4}s, optimizer loss={loss:.4}, test mae={test_mae:.4}"
-                + (f" test mae force={f_test_mae:.4}")
+                + (f" test mae force={f_test_mae:.4}") + (f" train mae={train_mae:.4}") + 
+                (f" train mae force={f_train_mae:.4}")
             )
+            with open(f"{filename}_epochs.dat", "a") as f:
+                np.savetxt(f, [[n_epochs_total, test_mae.detach(), f_test_mae.detach(), train_mae.detach(), f_train_mae.detach()]])  
+
             np.savetxt(
                 f"{filename}-energy_test.dat",
                 np.hstack([reference.cpu().detach().numpy(), predicted.cpu().detach().numpy()]),
@@ -581,10 +570,11 @@ def run_fit(datafile, parameters, device="cpu"):
                 ),
             )
             if test_mae < best_mae:
-                best_mae = test_mae
+                best_mae = test_mae.detach().item()
                 torch.save(
-                    model.state_dict(), f"{filename}-restart.torch"
+                    model.state_dict(), f"{filename}-best.torch"
                 )  # no NOW string so we can restart but keep track of initial and final files
+            del train_mae, f_train_mae, test_mae, f_test_mae
 
 
 
@@ -595,33 +585,6 @@ def run_fit(datafile, parameters, device="cpu"):
         )  # no NOW string so we can restart but keep track of initial and final files
 
     torch.save(model.state_dict(), f"{filename}_{now}-final.torch")
-
-    if True: #with torch.no_grad():
-        tpredicted = []
-        treference = []
-        for (
-            tcomposition,
-            tradial_spectrum,
-            tspherical_expansions,
-            tenergies,
-            _,
-        ) in train_dataloader:
-            treference.append(tenergies)
-            predicted_e, _ = model(
-                tcomposition,
-                tradial_spectrum,
-                tspherical_expansions,
-                forward_forces=False,
-            )
-            tpredicted.append(predicted_e)
-
-        treference = torch.vstack(treference)
-        tpredicted = torch.vstack(tpredicted)
-        tmae = loss_mae(tpredicted, treference) / n_train
-
-    print(f"TRAIN MAE: {tmae.item()/42} eV/at")
-    print(f"TEST MAE: {test_mae.item()/42} eV/at")
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(

@@ -85,6 +85,8 @@ class MultiBodyOrderModel(torch.nn.Module):
                 self.nn_model = NNModel(nn_layer_size)
 
         self.latest_energies = {}
+        self.latest_forces = {}
+
         self.optimizable_weights = optimizable_weights
         self.random_initial_weights = random_initial_weights
 
@@ -115,13 +117,14 @@ class MultiBodyOrderModel(torch.nn.Module):
                 radial_spectrum_per_structure, with_forces=forward_forces
             )
 
+            self.latest_energies['radial'] = energies_rs
+            self.latest_forces['radial'] = forces_rs
+
             if energies is None:
                 energies = energies_rs
             else:
                 energies += energies_rs
             
-            self.latest_energies['radial'] = energies_rs
-
             if forces_rs is not None:
                 if forces is None:
                     forces = forces_rs
@@ -135,13 +138,15 @@ class MultiBodyOrderModel(torch.nn.Module):
             energies_ps, forces_ps = self.power_spectrum_model(
                 power_spectrum_per_structure, with_forces=forward_forces
             )
+
+            self.latest_energies['power'] = energies_ps
+            self.latest_forces['power'] = forces_ps
+
             if energies is None:
                 energies = energies_ps
             else:
                 energies += energies_ps
             
-            self.latest_energies['power'] = energies_ps
-
             if forces_ps is not None:
                 if forces is None:
                     forces = forces_ps
@@ -151,12 +156,14 @@ class MultiBodyOrderModel(torch.nn.Module):
             if self.nn_model is not None:
                 nn_energies, nn_forces = self.nn_model(power_spectrum, with_forces=forward_forces)
                 energies += nn_energies
+                
                 self.latest_energies['nn'] = nn_energies
+                self.latest_forces['nn'] = nn_forces
 
                 if forces is None:
                     forces = nn_forces
                 else:
-                    forces += nn_forces
+                    forces += nn_forces                    
 
         return energies, forces
 

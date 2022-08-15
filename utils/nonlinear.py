@@ -17,6 +17,12 @@ class NNModel(torch.nn.Module):
             torch.manual_seed(seed)
 
         X = descriptor.block().values
+
+        # inizialize nn with zero weights ?? 
+        def init_zero_weights(m):
+            if isinstance(m, torch.nn.Linear):
+                m.weight.data.fill_(0)
+                m.bias.data.fill_(0)
         self.nn = torch.nn.Sequential(torch.nn.Linear(X.shape[-1], self.layer_size),
                                         torch.nn.Tanh(),
                                         torch.nn.Linear(self.layer_size, self.layer_size),
@@ -35,8 +41,8 @@ class NNModel(torch.nn.Module):
         nn_per_structure.index_add_(0, structure_map, nn_per_atom)
         energies = nn_per_structure            
         if with_forces:
-            nn_grads = torch.autograd.grad(nn_per_atom, ps_tensor, grad_outputs = torch.ones_like(nn_per_atom),
-                                        create_graph=True)
+            nn_grads = torch.autograd.grad(nn_per_structure, ps_tensor, grad_outputs = torch.ones_like(nn_per_structure),
+                                        create_graph=True, retain_graph=True)
             ps_gradient = descriptor.block().gradient("positions")
             ps_tensor_grad = ps_gradient.data.reshape(-1, 3, ps_tensor.shape[-1])
             
