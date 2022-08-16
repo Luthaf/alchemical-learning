@@ -423,7 +423,6 @@ def run_fit(datafile, parameters, device="cpu"):
                     model.composition_model.weights
                 )
             if model.radial_spectrum_model is not None:
-                print(model.radial_spectrum_model)
                 loss += TORCH_REGULARIZER_RADIAL_SPECTRUM * torch.linalg.norm(
                     model.radial_spectrum_model.weights
                 )
