@@ -2,7 +2,6 @@ numpy
 torch
 
 ase
-rascaline @ https://github.com/Luthaf/rascaline/archive/6497955a1cdd1d2a2e5f5aa69eb586684389d5f0.zip
-equistore @ https://github.com/lab-cosmo/equistore/archive/aa9cde9ad1329d1d4b9763f47065f55662e3168c.zip
+rascaline @ https://github.com/Luthaf/rascaline/archive/8649a5cc5681c1663079253c3a9debfde68025c3.zip
 scikit-learn
 skcosmo

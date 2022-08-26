@@ -14,9 +14,6 @@ except NameError:
         return func
 
 
-MB_DEFAULT_OPTIONS = {}
-
-
 class CombinedPowerSpectrum(torch.nn.Module):
     def __init__(self, combiner):
         super().__init__()
@@ -32,32 +29,37 @@ class CombinedPowerSpectrum(torch.nn.Module):
         return ps
 
 
-class MultiBodyOrderModel(torch.nn.Module):
+class AlchemicalModel(torch.nn.Module):
     def __init__(
         self,
-        power_spectrum,
+        # combiner for the spherical expansion (mainly tested with alchemical
+        # combination)
+        combiner,
+        # Regularizer for the 1-body/composition model. Set to None to remove
+        # the 1-body model from the fit
         composition_regularizer,
+        # Regularizer for the 2-body/radial spectrum model. Set to None to remove
+        # the 2-body model from the fit
         radial_spectrum_regularizer,
+        # Regularizer for the 3-body/power spectrum model. Set to None to remove
+        # the 3-body model from the fit
         power_spectrum_regularizer,
-        optimizable_weights,
-        random_initial_weights,
-        nn_layer_size=0,
+        # Number of layers for the neural network applied on top of power spectrum
+        # Set to None to use a pure linear model
+        nn_layer_size=None,
         # list of atomic types to explode the power spectrum. None to use same
         # model for all centers (default)
         ps_center_types=None,
     ):
         super().__init__()
 
-        # optimizable_weights = False is not very well tested ...
-        assert optimizable_weights
-
         if composition_regularizer is None:
             self.composition_model = None
         else:
             self.composition_model = LinearModel(
                 regularizer=composition_regularizer,
-                optimizable_weights=optimizable_weights,
-                random_initial_weights=random_initial_weights,
+                optimizable_weights=True,
+                random_initial_weights=True,
             )
 
         if radial_spectrum_regularizer is None:
@@ -65,34 +67,35 @@ class MultiBodyOrderModel(torch.nn.Module):
         else:
             self.radial_spectrum_model = LinearModel(
                 regularizer=radial_spectrum_regularizer,
-                optimizable_weights=optimizable_weights,
-                random_initial_weights=random_initial_weights,
+                optimizable_weights=True,
+                random_initial_weights=True,
             )
 
         if power_spectrum_regularizer is None:
             self.power_spectrum_model = None
         else:
             self.sum_structure = SumStructures(explode_centers=ps_center_types)
-            self.power_spectrum = power_spectrum
+            self.power_spectrum = CombinedPowerSpectrum(combiner)
             self.power_spectrum_model = LinearModel(
                 regularizer=power_spectrum_regularizer,
-                optimizable_weights=optimizable_weights,
-                random_initial_weights=random_initial_weights,
+                optimizable_weights=True,
+                random_initial_weights=True,
             )
-            if nn_layer_size==0:
+            if nn_layer_size == 0:
                 self.nn_model = None
             else:
                 self.nn_model = NNModel(nn_layer_size)
 
-        self.latest_energies = {}
-        self.latest_forces = {}
-
-        self.optimizable_weights = optimizable_weights
-        self.random_initial_weights = random_initial_weights
+        # self.latest_energies = {}
+        # self.latest_forces = {}
 
     @profile
     def forward(
-        self, composition, radial_spectrum, spherical_expansion, forward_forces=False
+        self,
+        composition,
+        radial_spectrum,
+        spherical_expansion,
+        forward_forces=False,
     ):
         if not forward_forces:
             # remove gradients if we don't need them
@@ -100,31 +103,29 @@ class MultiBodyOrderModel(torch.nn.Module):
             if radial_spectrum is not None:
                 radial_spectrum = remove_gradient(radial_spectrum)
 
-        self.latest_energies = {}
-        energies, forces = None, None
+        energies = torch.zeros(
+            (len(composition.block().samples), 1),
+            device=composition.block().values.device,
+        )
+        forces = None
 
         if self.composition_model is not None:
             energies_cmp, _ = self.composition_model(composition)
-            self.latest_energies['composition'] = energies_cmp
-            energies = energies_cmp
-            forces = None
+            # self.latest_energies["composition"] = energies_cmp
+            energies += energies_cmp
 
         if self.radial_spectrum_model is not None:
-            radial_spectrum_per_structure = (
-                radial_spectrum  # self.sum_structure(radial_spectrum)
-            )
+            # Radial spectrum is already summed per-structure
+            radial_spectrum_per_structure = radial_spectrum
             energies_rs, forces_rs = self.radial_spectrum_model(
                 radial_spectrum_per_structure, with_forces=forward_forces
             )
 
-            self.latest_energies['radial'] = energies_rs
-            self.latest_forces['radial'] = forces_rs
+            # self.latest_energies["radial"] = energies_rs
+            # self.latest_forces["radial"] = forces_rs
 
-            if energies is None:
-                energies = energies_rs
-            else:
-                energies += energies_rs
-            
+            energies += energies_rs
+
             if forces_rs is not None:
                 if forces is None:
                     forces = forces_rs
@@ -139,31 +140,30 @@ class MultiBodyOrderModel(torch.nn.Module):
                 power_spectrum_per_structure, with_forces=forward_forces
             )
 
-            self.latest_energies['power'] = energies_ps
-            self.latest_forces['power'] = forces_ps
+            # self.latest_energies["power"] = energies_ps
+            # self.latest_forces["power"] = forces_ps
 
-            if energies is None:
-                energies = energies_ps
-            else:
-                energies += energies_ps
-            
+            energies += energies_ps
+
             if forces_ps is not None:
                 if forces is None:
                     forces = forces_ps
                 else:
                     forces += forces_ps
-            
+
             if self.nn_model is not None:
-                nn_energies, nn_forces = self.nn_model(power_spectrum, with_forces=forward_forces)
+                nn_energies, nn_forces = self.nn_model(
+                    power_spectrum, with_forces=forward_forces
+                )
                 energies += nn_energies
-                
-                self.latest_energies['nn'] = nn_energies
-                self.latest_forces['nn'] = nn_forces
+
+                # self.latest_energies["nn"] = nn_energies
+                # self.latest_forces["nn"] = nn_forces
 
                 if forces is None:
                     forces = nn_forces
                 else:
-                    forces += nn_forces                    
+                    forces += nn_forces
 
         return energies, forces
 
