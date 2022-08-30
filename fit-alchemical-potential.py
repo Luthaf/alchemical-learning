@@ -250,6 +250,8 @@ def main(datafile, parameters, device="cpu"):
 
     n_epochs_already_done = parameters.get("n_epochs_already_done", 0)
     n_epochs = parameters["n_epochs"]
+    with open(f"{prefix}/epochs.dat", "a") as fd:
+                fd.write("epoch test_mae test_mae_forces loss train_mae\n")
     for epoch in range(n_epochs_already_done, n_epochs):
         print("Beginning epoch", epoch)
         epoch_start = time.time()
@@ -312,6 +314,7 @@ def main(datafile, parameters, device="cpu"):
             print(
                 f"    train loss: {loss.item()} E={energy_loss}, F={loss_force.item()}"
             )
+            
             loss.backward(retain_graph=False)
             return loss
 
@@ -319,6 +322,15 @@ def main(datafile, parameters, device="cpu"):
 
         epoch_time = time.time() - epoch_start
         if epoch % 1 == 0:
+            predicted, _ = model(
+                        composition,
+                        radial_spectrum,
+                        spherical_expansions,
+                        forward_forces=False,
+                    )   
+            train_mae = loss_mae(predicted, energies)                   
+            train_mae /= n_train + n_train_forces
+            
             predicted = []
             reference = []
             predicted_forces = []
@@ -337,8 +349,8 @@ def main(datafile, parameters, device="cpu"):
                     test_spherical_expansions,
                     forward_forces=True,
                 )
-                predicted.append(test_predicted_e)
-                predicted_forces.append(test_predicted_f)
+                predicted.append(test_predicted_e.detach())
+                predicted_forces.append(test_predicted_f.detach())
                 reference_forces.append(test_forces)
 
             reference = torch.vstack(reference)
@@ -367,7 +379,8 @@ def main(datafile, parameters, device="cpu"):
                 fd.write(f"{epoch} ")
                 fd.write(f"{test_mae.item()} ")
                 fd.write(f"{test_mae_forces.item()} ")
-                fd.write(f"{loss.item()}\n")
+                fd.write(f"{loss.item()} ")
+                fd.write(f"{train_mae.item()}\n")
 
             np.savetxt(
                 f"{prefix}/energy_test.dat",
