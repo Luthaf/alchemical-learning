@@ -315,8 +315,6 @@ def _collate_tensor_map_old(tensors, device):
 
 
 def _collate_tensor_map(tensors, device):
-    raise Exception("this function does not work")
-
     key_names = tensors[0].keys.names
     sample_names = tensors[0].block(0).samples.names
     if tensors[0].block(0).has_gradient("positions"):
@@ -333,6 +331,7 @@ def _collate_tensor_map(tensors, device):
     grad_values_dict = {key: [] for key in unique_keys}
     grad_samples_dict = {key: [] for key in unique_keys}
     grad_components_dict = {key: None for key in unique_keys}
+    previous_samples_count = {key: 0 for key in unique_keys}
 
     for tensor in tensors:
         for key, block in tensor:
@@ -343,13 +342,22 @@ def _collate_tensor_map(tensors, device):
                 components_dict[key] = block.components
                 properties_dict[key] = block.properties
             values_dict[key].append(block.values)
-            samples_dict[key].append(np.asarray(block.samples.tolist()))
+
+            samples = np.asarray(block.samples.tolist())
+            samples_dict[key].append(samples)
+
             if block.has_gradient("positions"):
                 gradient = block.gradient("positions")
                 if grad_components_dict[key] is None:
                     grad_components_dict[key] = gradient.components
                 grad_values_dict[key].append(gradient.data)
-                grad_samples_dict[key].append(np.asarray(gradient.samples.tolist()))
+
+                grad_samples = np.asarray(gradient.samples.tolist())
+                grad_samples[:, 0] += previous_samples_count[key]
+                grad_samples_dict[key].append(grad_samples)
+
+            previous_samples_count[key] += samples.shape[0]
+
     blocks = []
     for key in unique_keys:
         block = TensorBlock(
@@ -375,67 +383,6 @@ def _collate_tensor_map(tensors, device):
             )
         blocks.append(block)
 
-    """
-    for key_i, key in enumerate(unique_keys):
-        # this assumes that the keys are in the same order in all tensors (which
-        # should be fine in this project)
-        first_block = tensors[0].block(key_i)
-        if first_block.has_gradient("positions"):
-            first_block_grad = first_block.gradient("positions")
-        else:
-            first_block_grad = None
-
-        samples = []
-        values = []
-
-        grad_samples = []
-        grad_data = []
-        previous_samples_count = 0
-        for tensor in tensors:
-
-
-            block = tensor.block(key_i)
-
-            new_samples = block.samples.view(dtype=np.int32).reshape(
-                -1, len(block.samples.names)
-            )
-            samples.append(new_samples)
-            values.append(block.values)
-
-            if block.has_gradient("positions"):
-                gradient = block.gradient("positions")
-
-                new_grad_samples = (
-                    gradient.samples.view(dtype=np.int32).reshape(-1, 3).copy()
-                )
-                new_grad_samples[:, 0] += previous_samples_count
-                grad_samples.append(new_grad_samples)
-
-                grad_data.append(gradient.data)
-
-            previous_samples_count += new_samples.shape[0]
-        new_block = TensorBlock(
-            values=torch.vstack(values).to(device),
-            samples=Labels(
-                block.samples.names,
-                np.vstack(samples),
-            ),
-            components=first_block.components,
-            properties=first_block.properties,
-        )
-        if first_block_grad is not None:
-            new_block.add_gradient(
-                "positions",
-                data=torch.vstack(grad_data).to(device),
-                samples=Labels(
-                    ["sample", "structure", "atom"],
-                    np.vstack(grad_samples),
-                ),
-                components=first_block_grad.components,
-            )
-
-        blocks.append(new_block)
-    """
     return TensorMap(Labels(key_names, np.asarray(unique_keys, dtype=np.int32)), blocks)
 
 
@@ -446,15 +393,15 @@ def _collate_data(device, dataset):
         if composition[0] is None:
             composition = None
         else:
-            composition = _collate_tensor_map_old(composition, device)
+            composition = _collate_tensor_map(composition, device)
 
         radial_spectrum = [d[1] for d in data]
         if radial_spectrum[0] is None:
             radial_spectrum = None
         else:
-            radial_spectrum = _collate_tensor_map_old(radial_spectrum, device)
+            radial_spectrum = _collate_tensor_map(radial_spectrum, device)
 
-        spherical_expansion = _collate_tensor_map_old([d[2] for d in data], device)
+        spherical_expansion = _collate_tensor_map([d[2] for d in data], device)
 
         energies = torch.vstack([d[3] for d in data]).to(device=device)
         if data[0][4] is not None:
