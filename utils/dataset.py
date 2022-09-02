@@ -315,6 +315,7 @@ def _collate_tensor_map_old(tensors, device):
 
 
 def _collate_tensor_map(tensors, device):
+    raise Exception("this function does not work")
 
     key_names = tensors[0].keys.names
     sample_names = tensors[0].block(0).samples.names
@@ -445,15 +446,15 @@ def _collate_data(device, dataset):
         if composition[0] is None:
             composition = None
         else:
-            composition = _collate_tensor_map(composition, device)
+            composition = _collate_tensor_map_old(composition, device)
 
         radial_spectrum = [d[1] for d in data]
         if radial_spectrum[0] is None:
             radial_spectrum = None
         else:
-            radial_spectrum = _collate_tensor_map(radial_spectrum, device)
+            radial_spectrum = _collate_tensor_map_old(radial_spectrum, device)
 
-        spherical_expansion = _collate_tensor_map([d[2] for d in data], device)
+        spherical_expansion = _collate_tensor_map_old([d[2] for d in data], device)
 
         energies = torch.vstack([d[3] for d in data]).to(device=device)
         if data[0][4] is not None:
