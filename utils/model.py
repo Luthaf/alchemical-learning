@@ -50,6 +50,8 @@ class AlchemicalModel(torch.nn.Module):
         # list of atomic types to explode the power spectrum. None to use same
         # model for all centers (default)
         ps_center_types=None,
+        optimizable_weights=True,
+        random_initial_weights=True,
     ):
         super().__init__()
 
@@ -58,8 +60,8 @@ class AlchemicalModel(torch.nn.Module):
         else:
             self.composition_model = LinearModel(
                 regularizer=composition_regularizer,
-                optimizable_weights=True,
-                random_initial_weights=True,
+                optimizable_weights=optimizable_weights,
+                random_initial_weights=random_initial_weights,
             )
 
         if radial_spectrum_regularizer is None:
@@ -67,8 +69,8 @@ class AlchemicalModel(torch.nn.Module):
         else:
             self.radial_spectrum_model = LinearModel(
                 regularizer=radial_spectrum_regularizer,
-                optimizable_weights=True,
-                random_initial_weights=True,
+                optimizable_weights=optimizable_weights,
+                random_initial_weights=random_initial_weights,
             )
 
         if power_spectrum_regularizer is None:
@@ -78,16 +80,18 @@ class AlchemicalModel(torch.nn.Module):
             self.power_spectrum = CombinedPowerSpectrum(combiner)
             self.power_spectrum_model = LinearModel(
                 regularizer=power_spectrum_regularizer,
-                optimizable_weights=True,
-                random_initial_weights=True,
+                optimizable_weights=optimizable_weights,
+                random_initial_weights=random_initial_weights,
             )
+
             if nn_layer_size == 0:
                 self.nn_model = None
             else:
+                if not optimizable_weights:
+                    raise Exception(
+                        "can not use the NN model with optimizable_weights=False"
+                    )
                 self.nn_model = NNModel(nn_layer_size)
-
-        # self.latest_energies = {}
-        # self.latest_forces = {}
 
     @profile
     def forward(
@@ -111,7 +115,6 @@ class AlchemicalModel(torch.nn.Module):
 
         if self.composition_model is not None:
             energies_cmp, _ = self.composition_model(composition)
-            # self.latest_energies["composition"] = energies_cmp
             energies += energies_cmp
 
         if self.radial_spectrum_model is not None:
@@ -120,9 +123,6 @@ class AlchemicalModel(torch.nn.Module):
             energies_rs, forces_rs = self.radial_spectrum_model(
                 radial_spectrum_per_structure, with_forces=forward_forces
             )
-
-            # self.latest_energies["radial"] = energies_rs
-            # self.latest_forces["radial"] = forces_rs
 
             energies += energies_rs
 
@@ -140,9 +140,6 @@ class AlchemicalModel(torch.nn.Module):
                 power_spectrum_per_structure, with_forces=forward_forces
             )
 
-            # self.latest_energies["power"] = energies_ps
-            # self.latest_forces["power"] = forces_ps
-
             energies += energies_ps
 
             if forces_ps is not None:
@@ -156,9 +153,6 @@ class AlchemicalModel(torch.nn.Module):
                     power_spectrum, with_forces=forward_forces
                 )
                 energies += nn_energies
-
-                # self.latest_energies["nn"] = nn_energies
-                # self.latest_forces["nn"] = nn_forces
 
                 if forces is None:
                     forces = nn_forces
@@ -187,11 +181,15 @@ class AlchemicalModel(torch.nn.Module):
                 composition, energies, forces, seed
             )
 
+            energies -= self.composition_model(composition)[0]
+
         if self.radial_spectrum_model is not None:
             radial_spectrum_per_structure = radial_spectrum
             self.radial_spectrum_model.initialize_model_weights(
                 radial_spectrum_per_structure, energies, forces, seed
             )
+
+            energies -= self.radial_spectrum_model(radial_spectrum_per_structure)[0]
 
         if self.power_spectrum_model is not None:
             power_spectrum = self.power_spectrum(spherical_expansion)
@@ -199,5 +197,8 @@ class AlchemicalModel(torch.nn.Module):
             self.power_spectrum_model.initialize_model_weights(
                 power_spectrum_per_structure, energies, forces, seed
             )
+
+            energies -= self.power_spectrum_model(power_spectrum_per_structure)[0]
+
             if self.nn_model is not None:
                 self.nn_model.initialize_model_weights(power_spectrum, energies, forces)
