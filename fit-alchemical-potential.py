@@ -210,9 +210,9 @@ def main(datafile, parameters, device="cpu"):
 
     json.dump(parameters, open(f"{prefix}/parameters.json", "w"))
 
-    if parameters.get("do_restart", False):
+    if parameters.get("restart", False):
         try:
-            state = torch.load(f"{prefix}/restart.torch")
+            state = torch.load("./restart.torch")
             print("Restarting model parameters from file")
             model.load_state_dict(state)
         except FileNotFoundError:
@@ -244,7 +244,7 @@ def main(datafile, parameters, device="cpu"):
                 f_energies,
                 f_forces,
             ) = next(iter(train_forces_dataloader_grad_no_batch))
-            del train_forces_dataset
+            del train_forces_dataset_grad
 
     best_mae = 1e100
 
