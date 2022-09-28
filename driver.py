@@ -59,7 +59,7 @@ class GenericMDCalculator:
         model_state_path,
         model_parameters_path,
         structure_template=None,
-        atomic_numbers=None,
+        starting_frame=None,
     ):
         super().__init__()
 
@@ -67,8 +67,8 @@ class GenericMDCalculator:
             self.template_filename = structure_template
             self.atoms = ase.io.read(structure_template, 0)
             self.atoms.pbc = [True, True, True]
-        elif atomic_numbers is not None:
-            self.atoms = ase.Atoms(numbers=atomic_numbers, pbc=[True, True, True])
+        elif starting_frame is not None:
+            self.atoms = starting_frame
         else:
             raise ValueError(
                 "Must specify one of 'structure_template' or 'atomic_numbers'"
