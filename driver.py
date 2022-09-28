@@ -190,13 +190,13 @@ class GenericMDCalculator:
         energy_torch.backward()
 
         forces_torch = -torch_system.positions.grad
-        stress_torch = torch_system.cell.grad
+        cell_grad = torch_system.cell.grad
 
         energy = energy_torch.detach().numpy()
         forces = forces_torch.numpy()
-        stress = stress_torch.numpy()
 
-        # Symmetrize the stress matrix (replicate upper-diagonal entries)
-        # stress += np.triu(stress, k=1).T
+        virial = cell_grad.numpy().T @ cell_matrix
+        # Symmetrize the virial
+        virial = 0.5 * (virial + virial.T)
 
-        return energy, forces, stress
+        return energy, forces, virial
