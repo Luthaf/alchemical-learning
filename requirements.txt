@@ -6,6 +6,6 @@ ase
 scikit-learn
 skcosmo
 
-rascaline_torch @ https://github.com/Luthaf/rascaline-torch/archive/fe3105d.zip
-rascaline @ https://github.com/Luthaf/rascaline/archive/2b8346d.zip
+rascaline_torch @ https://github.com/Luthaf/rascaline-torch/archive/7c8106a.zip
+rascaline @ https://github.com/Luthaf/rascaline/archive/dddada8.zip
 equistore @ https://github.com/lab-cosmo/equistore/archive/51fc78c.zip
