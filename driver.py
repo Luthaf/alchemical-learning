@@ -195,8 +195,11 @@ class GenericMDCalculator:
         energy = energy_torch.detach().numpy()
         forces = forces_torch.numpy()
 
-        virial = cell_grad.numpy().T @ cell_matrix
-        # Symmetrize the virial
+        print("gradient", cell_grad.numpy().T)
+        print("virial", cell_grad.numpy().T@cell_matrix)
+        # Computes the virial as -dV/deps (eps is the strain)
+        virial = -cell_grad.numpy().T @ cell_matrix
+        # Symmetrize the virial (should already be almost symmetric, this is a good check)
         virial = 0.5 * (virial + virial.T)
 
         return energy, forces, virial
