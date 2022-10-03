@@ -1,13 +1,13 @@
 """Generic calculator-style interface for MD"""
-import ase.io
-import numpy as np
 import json
 
+import ase.io
 import torch
+from rascaline_torch import as_torch_system
+
+from utils.combine import CombineSpecies
 from utils.dataset import AtomisticDataset, create_dataloader
-from utils.soap import PowerSpectrum
-from utils.combine import CombineRadial, CombineRadialSpecies, CombineSpecies
-from mbmodel import CombinedPowerSpectrum, MultiBodyOrderModel
+from utils.model import AlchemicalModel
 
 torch.set_default_dtype(torch.float64)
 
@@ -58,113 +58,66 @@ class GenericMDCalculator:
         self,
         model_state_path,
         model_parameters_path,
-        is_periodic,
         structure_template=None,
-        atomic_numbers=None,
+        starting_frame=None,
     ):
         super().__init__()
-        # self.model = torch.load(model_pt)
-        # Structure initialization
-        self.is_periodic = is_periodic
 
         if structure_template is not None:
             self.template_filename = structure_template
             self.atoms = ase.io.read(structure_template, 0)
-            if (is_periodic is not None) and (
-                is_periodic != np.any(self.atoms.get_pbc())
-            ):
-                raise ValueError(
-                    "Structure template PBC flags: "
-                    + str(self.atoms.get_pbc())
-                    + " incompatible with 'is_periodic' setting"
-                )
-        elif atomic_numbers is not None:
-            self.atoms = ase.Atoms(numbers=atomic_numbers, pbc=is_periodic)
+            self.atoms.pbc = [True, True, True]
+        elif starting_frame is not None:
+            self.atoms = starting_frame
         else:
             raise ValueError(
                 "Must specify one of 'structure_template' or 'atomic_numbers'"
             )
 
-        frames = [self.atoms]
-        print(len(self.atoms))
-        energies = torch.tensor([[0.0]])
-        forces = [torch.tensor(np.zeros((len(frames[0]), 3)))]
-
-        self.model_parameters = json.load(
-            open(model_parameters_path),
-            object_hook=lambda d: {
-                int(k) if k.lstrip("-").isdigit() else k: v for k, v in d.items()
-            },
-        )
-
-        pars_dict = self.model_parameters
-        train_normalization = (
-            pars_dict["normalization"] if "normalization" in pars_dict else None
-        )
-        rng_seed = (
-            pars_dict["seed"] if "seed" in pars_dict else None
-        )  # defaults to random seed
-        per_center_ps = (
-            pars_dict["per_center_ps"] if "per_center_ps" in pars_dict else False
-        )
-        per_l_combine = (
-            pars_dict["per_l_combine"] if "per_l_combine" in pars_dict else False
-        )
-        N_PSEUDO_SPECIES = (
-            pars_dict["n_pseudo_species"] if "n_pseudo_species" in pars_dict else 4
-        )
+        with open(model_parameters_path) as fd:
+            self._params = json.load(fd)
 
         self.hypers = {}
-        if "hypers_ps" in self.model_parameters:
-            self.hypers["spherical_expansion"] = self.model_parameters["hypers_ps"]
-        if "hypers_rs" in self.model_parameters:
-            self.hypers["radial_spectrum"] = self.model_parameters["hypers_rs"]
+        if "hypers_ps" in self._params:
+            hypers_ps = self._params["hypers_ps"]
+            if "radial_per_angular" in hypers_ps:
+                hypers_ps["radial_per_angular"] = {
+                    int(l): n for l, n in hypers_ps["radial_per_angular"].items()
+                }
 
-        dataset_grad = AtomisticDataset(
-            frames,
+            self.hypers["spherical_expansion"] = hypers_ps
+
+        if "hypers_rs" in self._params:
+            self.hypers["radial_spectrum"] = self._params["hypers_rs"]
+
+        self._dataset = AtomisticDataset(
+            [self.atoms],
             all_species,
             self.hypers,
-            energies,
-            forces,
-            normalization=train_normalization,
-            do_gradients=True,
+            torch.tensor([[0.0]]),
+            do_gradients=False,
         )
 
-        dataloader_grad = create_dataloader(
-            dataset_grad,
+        dataloader = create_dataloader(
+            self._dataset,
             batch_size=1,
             shuffle=False,
             device=device,
         )
-        TORCH_REGULARIZER = 1e-2
-        LINALG_REGULARIZER_ENERGIES = 1e-2
-        LINALG_REGULARIZER_FORCES = 1e-1
 
         combiner = CombineSpecies(
             species=all_species,
-            n_pseudo_species=N_PSEUDO_SPECIES,
-            per_l_max=(
-                self.hypers["spherical_expansion"]["max_angular"]
-                if per_l_combine
-                else 0
-            ),
+            n_pseudo_species=self._params["n_pseudo_species"],
         )
 
-        power_spectrum = CombinedPowerSpectrum(combiner)
-        self.model = MultiBodyOrderModel(
-            power_spectrum=power_spectrum,
-            composition_regularizer=[1e-10],
-            radial_spectrum_regularizer=[
-                LINALG_REGULARIZER_ENERGIES,
-                LINALG_REGULARIZER_FORCES,
-            ],
-            power_spectrum_regularizer=[
-                LINALG_REGULARIZER_ENERGIES,
-                LINALG_REGULARIZER_FORCES,
-            ],
+        self.model = AlchemicalModel(
+            combiner=combiner,
+            composition_regularizer=self._params.get("composition_regularizer"),
+            radial_spectrum_regularizer=self._params.get("radial_spectrum_regularizer"),
+            power_spectrum_regularizer=self._params.get("power_spectrum_regularizer"),
+            nn_layer_size=self._params.get("nn_layer_size", 0),
             optimizable_weights=True,
             random_initial_weights=True,
-            ps_center_types=(all_species if per_center_ps else None),
         )
 
         self.model.to(device=device, dtype=torch.get_default_dtype())
@@ -176,15 +129,12 @@ class GenericMDCalculator:
                 radial_spectrum,
                 spherical_expansions,
                 energies,
-                forces,
-            ) in dataloader_grad:
-                # we want to intially train the model on all frames, to ensure the
-                # support points come from the full dataset.
+                _,
+            ) in dataloader:
                 self.model.initialize_model_weights(
-                    composition, radial_spectrum, spherical_expansions, energies, forces
+                    composition, radial_spectrum, spherical_expansions, energies
                 )
 
-        # modelfilename = "/home/lopanits/chemlearning/alchemical-learning/model_state_dict/CombinedLinearModel-4-mixed-100-train-100-test-4-max_ang-8-max_rad-0.3-sigma-4.0-cutoff-4-species-opt-weights-random-weights/1-epoch.pt"
         self.model.load_state_dict(torch.load(model_state_path, map_location=device))
         self.model.eval()
 
@@ -206,6 +156,7 @@ class GenericMDCalculator:
         (volume-normalized) and are defined as the gradients of the
         energy with respect to the cell parameters.
         """
+
         # Quick consistency checks
         if positions.shape != (len(self.atoms), 3):
             raise ValueError(
@@ -214,42 +165,40 @@ class GenericMDCalculator:
         if cell_matrix.shape != (3, 3):
             raise ValueError("Improper shape of cell info (expected 3x3 matrix)")
 
-        # Update ASE Atoms object (we only use ASE to handle any
-        # re-wrapping of the atoms that needs to take place)
+        # Update ASE Atoms object
         self.atoms.set_cell(cell_matrix)
         self.atoms.set_positions(positions)
 
         # Compute representations and evaluate model
-        ## TODO compute spherical expansion here
-        ## TODO convert between numpy and pytroch
-        frames = [self.atoms]
-        energies = torch.tensor([[0.0]])
-        forces = [torch.tensor(np.zeros((len(frames[0]), 3)))]
-        HYPERS = self.hypers
-        dataset_grad = AtomisticDataset(
-            frames, all_species, self.hypers, energies, forces, do_gradients=True
-        )
+        # TODO: handle different devices
+        composition = self._dataset.compute_composition(self.atoms, 0)
+        torch_system = as_torch_system(self.atoms)
+        torch_system.positions.requires_grad_(True)
+        torch_system.cell.requires_grad_(True)
 
-        dataloader_grad = create_dataloader(
-            dataset_grad,
-            batch_size=1,
-            shuffle=False,
-            device=device,
-        )
+        radial_spectrum = self._dataset.compute_radial_spectrum(torch_system, 0)
+        spherical_expansion = self._dataset.compute_spherical_expansion(torch_system, 0)
 
-        for (
+        energy_torch, _ = self.model(
             composition,
             radial_spectrum,
-            spherical_expansions,
-            energies,
-            forces,
-        ) in dataloader_grad:
-            energy_torch, forces_torch = self.model(
-                composition, radial_spectrum, spherical_expansions, forward_forces=True
-            )
-        energy = energy_torch.detach().numpy().flatten()
-        forces = forces_torch.detach().numpy().flatten()
-        stress_matrix = np.zeros((3, 3))
-        # Symmetrize the stress matrix (replicate upper-diagonal entries)
-        stress_matrix += np.triu(stress_matrix, k=1).T
-        return energy, forces, stress_matrix
+            spherical_expansion,
+            forward_forces=False,
+        )
+
+        # backward propagation for forces and stress
+        energy_torch.backward()
+
+        forces_torch = -torch_system.positions.grad
+        cell_grad = torch_system.cell.grad
+
+        energy = energy_torch.detach().numpy()
+        forces = forces_torch.numpy()
+
+        # Computes the virial as -dU/de (e is the strain)
+        virial = -cell_grad.numpy().T @ cell_matrix
+        # Symmetrize the virial (should already be almost symmetric, this is a
+        # good check)
+        virial = 0.5 * (virial + virial.T)
+
+        return energy, forces, virial
