@@ -48,7 +48,7 @@ def _block_to_torch(block, structure_i):
     return new_block
 
 
-def _move_to_torch(tensor_map, structure_i):
+def _move_to_torch(tensor_map, structure_i, detach=False):
     blocks = []
     for _, block in tensor_map:
         blocks.append(_block_to_torch(block, structure_i))
@@ -56,11 +56,28 @@ def _move_to_torch(tensor_map, structure_i):
     return TensorMap(tensor_map.keys, blocks)
 
 
-def _remove_requires_grad(tensor_map):
+def _detach_all_blocks(tensor_map):
+    blocks = []
     for _, block in tensor_map:
-        block.values.requires_grad_(False)
+        new_block = TensorBlock(
+            values=block.values.detach(),
+            samples=block.samples,
+            components=block.components,
+            properties=block.properties,
+        )
 
-    return tensor_map
+        for parameter in block.gradients_list():
+            gradient = block.gradient(parameter)
+
+            new_block.add_gradient(
+                parameter=parameter,
+                data=gradient.data.detach(),
+                samples=gradient.samples,
+                components=gradient.components,
+            )
+
+        blocks.append(new_block)
+    return TensorMap(tensor_map.keys, blocks)
 
 
 def _move_to_torch_by_l(tensor_maps, structure_i):
@@ -120,7 +137,7 @@ class AtomisticDataset(torch.utils.data.Dataset):
             for frame_i, frame in enumerate(frames):
                 system = as_torch_system(frame, positions_requires_grad=do_gradients)
                 self.radial_spectrum.append(
-                    _remove_requires_grad(self.compute_radial_spectrum(system, frame_i))
+                    _detach_all_blocks(self.compute_radial_spectrum(system, frame_i))
                 )
 
         else:
@@ -147,7 +164,7 @@ class AtomisticDataset(torch.utils.data.Dataset):
         for frame_i, frame in enumerate(frames):
             system = as_torch_system(frame, positions_requires_grad=do_gradients)
             self.spherical_expansions.append(
-                _remove_requires_grad(self.compute_spherical_expansion(system, frame_i))
+                _detach_all_blocks(self.compute_spherical_expansion(system, frame_i))
             )
 
         assert isinstance(energies, torch.Tensor)
