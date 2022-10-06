@@ -37,6 +37,11 @@ class NNModel(torch.nn.Module):
 
         ps_block = descriptor.block()
         ps_tensor = ps_block.values
+
+        if with_forces:
+            # TODO(guillaume): can this have unintended side effects???
+            ps_tensor.requires_grad_(True)
+
         structure_map, new_samples, _ = StructureMap(
             ps_block.samples["structure"], ps_tensor.device
         )
