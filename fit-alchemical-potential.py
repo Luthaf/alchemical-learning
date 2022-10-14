@@ -130,6 +130,12 @@ def main(datafile, parameters, device="cpu"):
 
     # --------- DATA LOADERS --------- #
     print("Creating data loaders")
+    train_dataloader = create_dataloader(
+        train_dataset,
+        batch_size=parameters.get("batch_size", len(train_dataset)),
+        shuffle=False,
+        device=device,
+    )
     train_dataloader_no_batch = create_dataloader(
         train_dataset,
         batch_size=len(train_dataset),
@@ -150,8 +156,15 @@ def main(datafile, parameters, device="cpu"):
             shuffle=False,
             device=device,
         )
+        train_forces_dataloader_grad = create_dataloader(
+            train_forces_dataset_grad,
+            batch_size=parameters.get("batch_size", len(train_forces_dataset_grad)),
+            shuffle=False,
+            device=device,
+        )
     else:
         train_forces_dataloader_grad_no_batch = None
+        train_forces_dataloader_grad = None
 
     test_dataloader_grad = create_dataloader(
         test_dataset_grad,
@@ -308,7 +321,8 @@ def main(datafile, parameters, device="cpu"):
     test_mae_prev = 1e100
     write_params_n_next_steps = 0
 
-    high_mem = True
+    # high_mem = True
+    high_mem = parameters.get("high_mem", True) # NOTE: Configuration "high_mem = False, n_train_forces != 0" needs to be tested
     if high_mem:
         composition, radial_spectrum, spherical_expansions, energies, forces = next(
             iter(train_dataloader_no_batch)
@@ -345,30 +359,78 @@ def main(datafile, parameters, device="cpu"):
 
         @profile
         def single_step():
-            # global composition, radial_spectrum, spherical_expansions, energies
+            global composition, radial_spectrum, spherical_expansions, energies
+            global f_composition, f_radial_spectrum, f_spherical_expansions, f_energies, f_forces
             optimizer.zero_grad()
             loss = torch.zeros(size=(1,), device=device)
             loss_force = torch.zeros(size=(1,), device=device)
-            assert high_mem
+            # assert high_mem
+            # predicted, _ = model(
+            #     composition,
+            #     radial_spectrum,
+            #     spherical_expansions,
+            #     forward_forces=False,
+            # )
+            # loss += loss_mse(predicted, energies)
 
-            predicted, _ = model(
-                composition,
-                radial_spectrum,
-                spherical_expansions,
-                forward_forces=False,
-            )
-            loss += loss_mse(predicted, energies)
+            # if n_train_forces != 0:
+            #     f_predicted_e, f_predicted_f = model(
+            #         f_composition,
+            #         f_radial_spectrum,
+            #         f_spherical_expansions,
+            #         forward_forces=True,
+            #     )
 
-            if n_train_forces != 0:
-                f_predicted_e, f_predicted_f = model(
-                    f_composition,
-                    f_radial_spectrum,
-                    f_spherical_expansions,
-                    forward_forces=True,
+            #     loss += loss_mse(f_predicted_e, f_energies)
+            #     loss_force += loss_mse(f_predicted_f, f_forces)
+            if high_mem:
+                predicted, _ = model(
+                    composition,
+                    radial_spectrum,
+                    spherical_expansions,
+                    forward_forces=False,
                 )
-
-                loss += loss_mse(f_predicted_e, f_energies)
-                loss_force += loss_mse(f_predicted_f, f_forces)
+                loss += loss_mse(predicted, energies)
+                if n_train_forces != 0:
+                    f_predicted_e, f_predicted_f = model(
+                        f_composition,
+                        f_radial_spectrum,
+                        f_spherical_expansions,
+                        forward_forces=True,
+                    )
+                    loss += loss_mse(f_predicted_e, f_energies)
+                    loss_force += loss_mse(f_predicted_f, f_forces)
+            else:
+                for (
+                    composition,
+                    radial_spectrum,
+                    spherical_expansions,
+                    energies,
+                    forces,
+                ) in train_dataloader:
+                    predicted, _ = model(
+                        composition,
+                        radial_spectrum,
+                        spherical_expansions,
+                        forward_forces=False,
+                    )
+                    loss += loss_mse(predicted, energies)
+                if n_train_forces != 0:
+                    for (
+                        f_composition,
+                        f_radial_spectrum,
+                        f_spherical_expansions,
+                        f_energies,
+                        f_forces,
+                    ) in train_forces_dataloader_grad:
+                        f_predicted_e, f_predicted_f = model(
+                            f_composition,
+                            f_radial_spectrum,
+                            f_spherical_expansions,
+                            forward_forces=True,
+                        )
+                        loss += loss_mse(f_predicted_e, f_energies)
+                        loss_force += loss_mse(f_predicted_f, f_forces)
 
             loss /= n_train + n_train_forces
             loss_force /= n_train_forces
@@ -417,13 +479,30 @@ def main(datafile, parameters, device="cpu"):
 
         epoch_time = time.time() - epoch_start
         if epoch % 1 == 0:
-            predicted, _ = model(
+            train_mae = 0
+            if high_mem:
+                predicted, _ = model(
+                            composition,
+                            radial_spectrum,
+                            spherical_expansions,
+                            forward_forces=False,
+                        )
+                train_mae = loss_mae(predicted, energies)
+            else:
+                for (
+                    composition,
+                    radial_spectrum,
+                    spherical_expansions,
+                    energies,
+                    forces,
+                ) in train_dataloader:
+                    predicted, _ = model(
                         composition,
                         radial_spectrum,
                         spherical_expansions,
                         forward_forces=False,
-                    )   
-            train_mae = loss_mae(predicted, energies)                   
+                    )
+                    train_mae+= loss_mae(predicted, energies)
             train_mae /= n_train + n_train_forces
             
             predicted = []
