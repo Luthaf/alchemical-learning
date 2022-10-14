@@ -2,5 +2,13 @@ virtualenv/
 
 *.pdf
 *.dat
+Test_runs/
+.vscode/
+2609/
+*example_*
+json_files/
+scripts/
+slurm-*
+
 
 __pycache__/

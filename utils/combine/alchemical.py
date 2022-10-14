@@ -131,7 +131,7 @@ class CombineSpeciesPerCenter(torch.nn.Module):
             self.register_buffer("combining_matrix", explicit_combining_matrix)
 
     def detach(self):
-        return CombineSpecies(
+        return CombineSpeciesPerCenter(
             list(self.species_remapping.keys()),
             self.combining_matrix.shape[-1],
             explicit_combining_matrix=self.combining_matrix.clone().detach(),

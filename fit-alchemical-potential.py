@@ -9,7 +9,8 @@ import ase.io
 import numpy as np
 import torch
 
-from utils.combine import CombineSpecies
+from utils.combine import CombineSpecies, CombineRadialSpecies, CombineRadialSpeciesWithAngular, \
+    CombineRadialSpeciesWithAngularAdaptBasis, CombineRadialSpeciesWithAngularAdaptBasisRadial
 from utils.dataset import AtomisticDataset, create_dataloader
 from utils.model import AlchemicalModel
 
@@ -82,11 +83,21 @@ def main(datafile, parameters, device="cpu"):
     )
 
     print("Computing representations")
-    hypers_ps = parameters["hypers_ps"]
+    # hypers_ps = parameters["hypers_ps"]
+    hypers_ps = parameters["hypers_ps"].copy()
+    
     if "radial_per_angular" in hypers_ps:
         hypers_ps["radial_per_angular"] = {
             int(k): v for k, v in hypers_ps["radial_per_angular"].items()
         }
+    combined_basis_per_angular = None
+    if "combined_basis_per_angular" in hypers_ps:
+        combined_basis_per_angular = hypers_ps.pop("combined_basis_per_angular")
+        combined_basis_per_angular = {
+            int(k): v for k, v in combined_basis_per_angular.items()
+        }
+
+    
     hypers_rs = parameters.get("hypers_rs")
 
     train_dataset = AtomisticDataset(
@@ -148,19 +159,60 @@ def main(datafile, parameters, device="cpu"):
         shuffle=False,
         device=device,
     )
+    
+    COMBINER_TYPE = parameters.get("combiner", "CombineSpecies")
 
-    combiner = CombineSpecies(
-        species=all_species,
-        n_pseudo_species=parameters["n_pseudo_species"],
-        # TODO: remove this from code
-        per_l_max=0,
-    )
+    combiner = None
+    # TODO:put seed
+    if COMBINER_TYPE == "CombineSpecies":
+        combiner = CombineSpecies(
+            species=all_species,
+            n_pseudo_species=parameters["n_pseudo_species"],
+            # TODO: remove this from code
+            per_l_max=0
+        )
+    elif COMBINER_TYPE == "CombineRadialSpecies":
+        combiner = CombineRadialSpecies(
+            n_species=len(all_species),
+            max_radial=hypers_ps["max_radial"],
+            n_combined_basis=parameters.get("n_combined_basis", 16),
+            seed=parameters.get("seed")
+        )
+    elif COMBINER_TYPE == "CombineRadialSpeciesWithAngular":
+        combiner = CombineRadialSpeciesWithAngular(
+            n_species=len(all_species),
+            max_radial=hypers_ps["max_radial"],
+            max_angular=hypers_ps["max_angular"],
+            n_combined_basis=parameters.get("n_combined_basis", 16),
+            seed=parameters.get("seed")
+        )
+    elif COMBINER_TYPE == "CombineRadialSpeciesWithAngularAdaptBasis":
+        combiner = CombineRadialSpeciesWithAngularAdaptBasis(
+            n_species=len(all_species),
+            max_radial=hypers_ps["max_radial"],
+            max_angular=hypers_ps["max_angular"],
+            n_combined_basis=parameters.get("n_combined_basis", 16),
+            combined_basis_per_angular=combined_basis_per_angular,
+            seed=parameters.get("seed")
+        )
+    elif COMBINER_TYPE == "CombineRadialSpeciesWithAngularAdaptBasisRadial":
+        combiner = CombineRadialSpeciesWithAngularAdaptBasisRadial(
+            n_species=len(all_species),
+            max_radial=hypers_ps["max_radial"],
+            max_angular=hypers_ps["max_angular"],
+            radial_per_angular=hypers_ps["radial_per_angular"],
+            n_combined_basis=parameters.get("n_combined_basis", 16),
+            combined_basis_per_angular=combined_basis_per_angular,
+            seed=parameters.get("seed")
+        )
 
     COMPOSITION_REGULARIZER = parameters.get("composition_regularizer")
     RADIAL_SPECTRUM_REGULARIZER = parameters.get("radial_spectrum_regularizer")
     POWER_SPECTRUM_REGULARIZER = parameters.get("power_spectrum_regularizer")
     NN_REGULARIZER = parameters.get("nn_regularizer")
     FORCES_LOSS_WEIGHT = parameters.get("forces_loss_weight")
+    OPTIMIZER_TYPE = parameters.get("optimizer", "LBFGS")
+    PS_COMBINER_REGULARIZER = parameters.get("power_spectrum_combiner_regularizer", None)
 
     model = AlchemicalModel(
         combiner=combiner,
@@ -194,11 +246,16 @@ def main(datafile, parameters, device="cpu"):
             )
             break
 
+    # crutch to manually move 'nn_model' to device
+    # model.nn_model.to(device=device, dtype=torch.get_default_dtype()) # commented out
+
     del radial_spectrum, spherical_expansions
     n_parameters = sum(
         len(p.detach().cpu().numpy().flatten()) for p in model.parameters()
     )
     print(f"Model parameters: {n_parameters}")
+    for name, param in model.named_parameters():
+        print(f"{name}, {param.detach().cpu().numpy().shape}")
 
     now = datetime.now().strftime("%y%m%d-%H%M")
     prefix = f"{parameters['prefix']}_{now}"
@@ -212,22 +269,44 @@ def main(datafile, parameters, device="cpu"):
 
     if parameters.get("restart", False):
         try:
-            state = torch.load("./restart.torch")
-            print("Restarting model parameters from file")
+            file_name = "restart.torch"
+            # file_name = "reg_off_opt_A_ts_1k_ncb_12_mr_16_best.torch"
+            state = torch.load("./" + file_name)
+            print("Restarting model parameters from file: " + file_name)
             model.load_state_dict(state)
         except FileNotFoundError:
             print("Restart file not found")
 
-    optimizer = torch.optim.LBFGS(
-        model.parameters(),
-        lr=parameters.get("learning_rate", 0.05),
-        line_search_fn="strong_wolfe",
-        history_size=128,
-    )
+    optimizer = None
+    if OPTIMIZER_TYPE == "LBFGS":
+        optimizer = torch.optim.LBFGS(
+            model.parameters(),
+            lr=parameters.get("learning_rate", 0.05),
+            line_search_fn="strong_wolfe",
+            history_size=128,
+        )
+    elif OPTIMIZER_TYPE == "ADAMW":
+        optimizer = torch.optim.AdamW(
+            model.parameters(),
+            lr=parameters.get("learning_rate", 0.05),
+        )
+    elif OPTIMIZER_TYPE == "SGD":
+        optimizer = torch.optim.SGD(
+            model.parameters(),
+            lr=parameters.get("learning_rate", 0.05),
+        )
 
     output = open(f"{prefix}/log.txt", "w")
-    output.write("# epoch  train_loss  test_mae test_mae_f\n")
+    if parameters.get("scheduler", False):
+        output.write("# epoch  train_loss  test_mae test_mae_f  curr_lr\n")
+    else:
+        output.write("# epoch  train_loss  test_mae test_mae_f\n")
     torch.save(model.state_dict(), f"{prefix}/initial.torch")
+
+    output_params = open(f"{prefix}/log_params.txt", "w")
+    output_params.write("# epoch  test_mae_prev  test_mae")
+    test_mae_prev = 1e100
+    write_params_n_next_steps = 0
 
     high_mem = True
     if high_mem:
@@ -247,11 +326,19 @@ def main(datafile, parameters, device="cpu"):
             del train_forces_dataset_grad
 
     best_mae = 1e100
+    best_mae_epoch = None
+    stop_epoch_size = 300
 
     n_epochs_already_done = parameters.get("n_epochs_already_done", 0)
     n_epochs = parameters["n_epochs"]
     with open(f"{prefix}/epochs.dat", "a") as fd:
                 fd.write("epoch test_mae test_mae_forces loss train_mae\n")
+
+    scheduler = None
+    if parameters.get("scheduler", False):
+        lambda1 = lambda x: (1.0 + np.cos(10*(1+x)/np.pi/(n_epochs - n_epochs_already_done)))/2
+        scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda1)
+
     for epoch in range(n_epochs_already_done, n_epochs):
         print("Beginning epoch", epoch)
         epoch_start = time.time()
@@ -300,6 +387,10 @@ def main(datafile, parameters, device="cpu"):
                 loss += POWER_SPECTRUM_REGULARIZER * torch.linalg.norm(
                     model.power_spectrum_model.weights
                 )
+                if PS_COMBINER_REGULARIZER is not None and model.power_spectrum.combiner is not None:
+                    loss += PS_COMBINER_REGULARIZER * sum(
+                        (p**2).sum() for p in model.power_spectrum.combiner.parameters()
+                    )
 
             if model.nn_model is not None:
                 loss += NN_REGULARIZER * sum(
@@ -318,7 +409,11 @@ def main(datafile, parameters, device="cpu"):
             loss.backward(retain_graph=False)
             return loss
 
-        loss = optimizer.step(single_step)
+        if OPTIMIZER_TYPE == "LBFGS":
+            loss = optimizer.step(single_step)
+        else:
+            for sub_epoch in range(25):
+                loss = optimizer.step(single_step)
 
         epoch_time = time.time() - epoch_start
         if epoch % 1 == 0:
@@ -364,10 +459,33 @@ def main(datafile, parameters, device="cpu"):
                 loss_mae(predicted_forces, reference_forces) / n_test / (3 * 42)
             )
 
-            output.write(
-                f"{epoch} {loss.item()} {test_mae.item()} {test_mae_forces.item()}\n"
-            )
+            if scheduler is not None:
+                curr_lr = optimizer.param_groups[0]["lr"]
+                output.write(
+                    f"{epoch} {loss.item()} {test_mae.item()} {test_mae_forces.item()} {curr_lr}\n"
+                )
+            else:
+                output.write(
+                    f"{epoch} {loss.item()} {test_mae.item()} {test_mae_forces.item()}\n"
+                )
             output.flush()
+
+            # if test_mae_prev * 10 < test_mae.item() or write_params_n_next_steps > 0:
+            if False:
+            # if True:
+                write_params_n_next_steps = 5
+                zeros = 0
+                output_params.write(f"\n!! {epoch} {test_mae_prev} {test_mae.item()}")
+                for ii, p in enumerate(model.parameters()):
+                    output_params.write(f"\n! {ii:04d}\n")
+                    for v in p.detach().cpu().numpy().flatten():
+                        output_params.write(f"{v:.5e}  ")
+                        if v == 0.0:
+                            zeros+= 1
+                # output_params.write(f"# zero params = {zeros:03d}  ")
+                output_params.flush()
+            test_mae_prev = test_mae.item()
+            write_params_n_next_steps = max(0, write_params_n_next_steps - 1)
 
             print(
                 f"epoch {epoch} took {epoch_time:.4}s, "
@@ -400,10 +518,17 @@ def main(datafile, parameters, device="cpu"):
             if test_mae < best_mae:
                 best_mae = test_mae.detach().item()
                 torch.save(model.state_dict(), f"{prefix}/best.torch")
+                best_mae_epoch = epoch
             del test_mae, test_mae_forces
+
+        if scheduler is not None:
+            scheduler.step()
 
         del loss
         torch.save(model.state_dict(), f"{prefix}/restart.torch")
+        
+        if best_mae_epoch is not None and (epoch - best_mae_epoch >= stop_epoch_size):
+            break
 
     torch.save(model.state_dict(), f"{prefix}/final.torch")
 
