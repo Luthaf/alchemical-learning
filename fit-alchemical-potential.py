@@ -323,6 +323,10 @@ def main(datafile, parameters, device="cpu"):
 
     # high_mem = True
     high_mem = parameters.get("high_mem", True) # NOTE: Configuration "high_mem = False, n_train_forces != 0" needs to be tested
+    print("high_mem = ", high_mem)
+    composition, radial_spectrum, spherical_expansions, energies = None, None, None, None
+    f_composition, f_radial_spectrum, f_spherical_expansions, f_energies, f_forces = None, None, None, None, None
+    print("type(composition)(0) = ", type(composition))
     if high_mem:
         composition, radial_spectrum, spherical_expansions, energies, forces = next(
             iter(train_dataloader_no_batch)
@@ -356,6 +360,7 @@ def main(datafile, parameters, device="cpu"):
     for epoch in range(n_epochs_already_done, n_epochs):
         print("Beginning epoch", epoch)
         epoch_start = time.time()
+        print("type(composition)(2) = ", type(composition))
 
         @profile
         def single_step():
@@ -364,6 +369,8 @@ def main(datafile, parameters, device="cpu"):
             optimizer.zero_grad()
             loss = torch.zeros(size=(1,), device=device)
             loss_force = torch.zeros(size=(1,), device=device)
+            # print("type(composition)(3) = ", type(composition))
+
             # assert high_mem
             # predicted, _ = model(
             #     composition,
