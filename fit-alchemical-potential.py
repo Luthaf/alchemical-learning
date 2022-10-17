@@ -119,13 +119,13 @@ def main(datafile, parameters, device="cpu"):
     else:
         train_forces_dataset_grad = None
 
-    test_dataset_grad = AtomisticDataset(
+    test_dataset = AtomisticDataset(
         test_frames,
         all_species,
         {"radial_spectrum": hypers_rs, "spherical_expansion": hypers_ps},
         test_energies,
         test_forces,
-        do_gradients=True,
+        do_gradients=parameters.get("do_gradients", True),
     )
 
     # --------- DATA LOADERS --------- #
@@ -166,8 +166,8 @@ def main(datafile, parameters, device="cpu"):
         train_forces_dataloader_grad_no_batch = None
         train_forces_dataloader_grad = None
 
-    test_dataloader_grad = create_dataloader(
-        test_dataset_grad,
+    test_dataloader = create_dataloader(
+        test_dataset,
         batch_size=50,
         shuffle=False,
         device=device,
@@ -321,12 +321,7 @@ def main(datafile, parameters, device="cpu"):
     test_mae_prev = 1e100
     write_params_n_next_steps = 0
 
-    # high_mem = True
     high_mem = parameters.get("high_mem", True) # NOTE: Configuration "high_mem = False, n_train_forces != 0" needs to be tested
-    print("high_mem = ", high_mem)
-    composition, radial_spectrum, spherical_expansions, energies = None, None, None, None
-    f_composition, f_radial_spectrum, f_spherical_expansions, f_energies, f_forces = None, None, None, None, None
-    print("type(composition)(0) = ", type(composition))
     if high_mem:
         composition, radial_spectrum, spherical_expansions, energies, forces = next(
             iter(train_dataloader_no_batch)
@@ -360,36 +355,16 @@ def main(datafile, parameters, device="cpu"):
     for epoch in range(n_epochs_already_done, n_epochs):
         print("Beginning epoch", epoch)
         epoch_start = time.time()
-        print("type(composition)(2) = ", type(composition))
 
         @profile
         def single_step():
-            global composition, radial_spectrum, spherical_expansions, energies
-            global f_composition, f_radial_spectrum, f_spherical_expansions, f_energies, f_forces
+            # global composition, radial_spectrum, spherical_expansions, energies
+            # global f_composition, f_radial_spectrum, f_spherical_expansions, f_energies, f_forces
+            nonlocal composition, radial_spectrum, spherical_expansions, energies
+            nonlocal f_composition, f_radial_spectrum, f_spherical_expansions, f_energies, f_forces
             optimizer.zero_grad()
             loss = torch.zeros(size=(1,), device=device)
             loss_force = torch.zeros(size=(1,), device=device)
-            # print("type(composition)(3) = ", type(composition))
-
-            # assert high_mem
-            # predicted, _ = model(
-            #     composition,
-            #     radial_spectrum,
-            #     spherical_expansions,
-            #     forward_forces=False,
-            # )
-            # loss += loss_mse(predicted, energies)
-
-            # if n_train_forces != 0:
-            #     f_predicted_e, f_predicted_f = model(
-            #         f_composition,
-            #         f_radial_spectrum,
-            #         f_spherical_expansions,
-            #         forward_forces=True,
-            #     )
-
-            #     loss += loss_mse(f_predicted_e, f_energies)
-            #     loss_force += loss_mse(f_predicted_f, f_forces)
             if high_mem:
                 predicted, _ = model(
                     composition,
@@ -514,36 +489,41 @@ def main(datafile, parameters, device="cpu"):
             
             predicted = []
             reference = []
-            predicted_forces = []
-            reference_forces = []
+            # predicted_forces = []
+            # reference_forces = []
             for (
                 test_composition,
                 test_radial_spectrum,
                 test_spherical_expansions,
                 test_energies,
                 test_forces,
-            ) in test_dataloader_grad:
+            ) in test_dataloader:
                 reference.append(test_energies)
-                test_predicted_e, test_predicted_f = model(
+                # test_predicted_e, test_predicted_f = model(
+                test_predicted_e, _ = model(
                     test_composition,
                     test_radial_spectrum,
                     test_spherical_expansions,
-                    forward_forces=True,
+                    # forward_forces=True,
+                    forward_forces=False,
                 )
                 predicted.append(test_predicted_e.detach())
-                predicted_forces.append(test_predicted_f.detach())
-                reference_forces.append(test_forces)
+                # predicted_forces.append(test_predicted_f.detach())
+                # reference_forces.append(test_forces)
 
             reference = torch.vstack(reference)
             predicted = torch.vstack(predicted)
             test_mae = loss_mae(predicted, reference) / n_test
 
-            reference_forces = torch.vstack(reference_forces)
-            predicted_forces = torch.vstack(predicted_forces)
+            # reference_forces = torch.vstack(reference_forces)
+            # predicted_forces = torch.vstack(predicted_forces)
             # TODO: do this properly
-            test_mae_forces = (
-                loss_mae(predicted_forces, reference_forces) / n_test / (3 * 42)
-            )
+            # test_mae_forces = (
+            #     loss_mae(predicted_forces, reference_forces) / n_test / (3 * 42)
+            # )
+            class C(): # a class which returns a dummy value by calling ".item()"
+                item = lambda x: -111.111
+            test_mae_forces = C()
 
             if scheduler is not None:
                 curr_lr = optimizer.param_groups[0]["lr"]
@@ -592,15 +572,15 @@ def main(datafile, parameters, device="cpu"):
                     [reference.cpu().detach().numpy(), predicted.cpu().detach().numpy()]
                 ),
             )
-            np.savetxt(
-                f"{prefix}/force_test.dat",
-                np.hstack(
-                    [
-                        reference_forces.cpu().detach().numpy().reshape(-1, 1),
-                        predicted_forces.cpu().detach().numpy().reshape(-1, 1),
-                    ]
-                ),
-            )
+            # np.savetxt(
+            #     f"{prefix}/force_test.dat",
+            #     np.hstack(
+            #         [
+            #             reference_forces.cpu().detach().numpy().reshape(-1, 1),
+            #             predicted_forces.cpu().detach().numpy().reshape(-1, 1),
+            #         ]
+            #     ),
+            # )
             if test_mae < best_mae:
                 best_mae = test_mae.detach().item()
                 torch.save(model.state_dict(), f"{prefix}/best.torch")
