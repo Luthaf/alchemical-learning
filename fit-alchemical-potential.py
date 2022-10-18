@@ -226,6 +226,7 @@ def main(datafile, parameters, device="cpu"):
     FORCES_LOSS_WEIGHT = parameters.get("forces_loss_weight")
     OPTIMIZER_TYPE = parameters.get("optimizer", "LBFGS")
     PS_COMBINER_REGULARIZER = parameters.get("power_spectrum_combiner_regularizer", None)
+    STOP_EPOCH_SIZE = parameters.get("stop_epoch_size", 300)
 
     model = AlchemicalModel(
         combiner=combiner,
@@ -340,7 +341,6 @@ def main(datafile, parameters, device="cpu"):
 
     best_mae = 1e100
     best_mae_epoch = None
-    stop_epoch_size = 300
 
     n_epochs_already_done = parameters.get("n_epochs_already_done", 0)
     n_epochs = parameters["n_epochs"]
@@ -593,7 +593,7 @@ def main(datafile, parameters, device="cpu"):
         del loss
         torch.save(model.state_dict(), f"{prefix}/restart.torch")
         
-        if best_mae_epoch is not None and (epoch - best_mae_epoch >= stop_epoch_size):
+        if best_mae_epoch is not None and (epoch - best_mae_epoch >= STOP_EPOCH_SIZE):
             break
 
     torch.save(model.state_dict(), f"{prefix}/final.torch")
