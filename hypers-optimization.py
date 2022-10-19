@@ -186,6 +186,9 @@ short_names_map = {
 params_grid_sample_keys = ["n_combined_basis", "max_radial", "combiner", "composition_regularizer", "radial_spectrum_regularizer",
     "power_spectrum_regularizer", "power_spectrum_combiner_regularizer"]
 
+# remove unique params from params_grid_sample_keys
+params_grid_sample_keys = [k for k in params_grid_sample_keys if len(params_grid[k]["values"]) > 1]
+
 # set hypers optimizer space
 hypers_space = [
             Integer(low=0, high=len(params_grid[k]["values"])-1, name=k) if params_grid[k]["dtype"] == np.float or params_grid[k]["dtype"] == np.int
