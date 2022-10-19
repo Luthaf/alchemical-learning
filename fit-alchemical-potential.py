@@ -225,7 +225,7 @@ def main(datafile, parameters, device="cpu"):
     NN_REGULARIZER = parameters.get("nn_regularizer")
     FORCES_LOSS_WEIGHT = parameters.get("forces_loss_weight")
     OPTIMIZER_TYPE = parameters.get("optimizer", "LBFGS")
-    PS_COMBINER_REGULARIZER = parameters.get("power_spectrum_combiner_regularizer", None)
+    PS_COMBINER_REGULARIZER = parameters.get("power_spectrum_combiner_regularizer", 0.0)
     STOP_EPOCH_SIZE = parameters.get("stop_epoch_size", 300)
 
     model = AlchemicalModel(
@@ -431,7 +431,7 @@ def main(datafile, parameters, device="cpu"):
                 loss += POWER_SPECTRUM_REGULARIZER * torch.linalg.norm(
                     model.power_spectrum_model.weights
                 )
-                if PS_COMBINER_REGULARIZER is not None and model.power_spectrum.combiner is not None:
+                if PS_COMBINER_REGULARIZER != 0.0 and model.power_spectrum.combiner is not None:
                     loss += PS_COMBINER_REGULARIZER * sum(
                         (p**2).sum() for p in model.power_spectrum.combiner.parameters()
                     )
