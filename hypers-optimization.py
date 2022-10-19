@@ -269,9 +269,14 @@ for i in range(100):
         f.write(str(res))
     with open('result.txt', 'a') as f:
         f.write(f"\nNumber of checked points: {i+1}")
-        f.write(f"\nList of prefices:\n")
+        f.write(f"\nList of prefices and f_vals (test_mae):\n")
+        f_val_min = min(data_dict["f_val"])
         for j, prefix in enumerate(data_dict["prefix"]):
-            f.write(f"{j:3}  {prefix}\n")
+            val = data_dict["f_val"][j]
+            if val == f_val_min:
+                f.write(f"{j:3}  {prefix}  {val} *min\n")
+            else:
+                f.write(f"{j:3}  {prefix}  {val}\n")
     print("Number of checked points: ", i+1)
     
     next_sample = hypers_opt.ask()
