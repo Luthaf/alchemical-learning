@@ -147,7 +147,7 @@ def save_plots(data_dict):
 params_grid = {
     "prefix": {"values": ["example"], "dtype": np.str},
     "learning_rate": {"values": [0.1], "dtype": np.float},
-    "n_epochs": {"values": [3000], "dtype": np.int},
+    "n_epochs": {"values": [2000], "dtype": np.int},
     "n_test": {"values": [1000], "dtype": np.int},
     "n_train": {"values": [1000], "dtype": np.int},
     "n_combined_basis": {"values": [4, 6, 8, 10, 12], "dtype": np.int},
@@ -215,7 +215,12 @@ next_sample = hypers_opt.ask()
 data_dict = {"f_val": [], "prefix": [], "sample_w": [], "dataframe":[],
              "min": {"test_mae": 1e100, "train_mae": 1e100, "loss": 1e100},
              "max": {"test_mae": 0.0, "train_mae": 0.0, "loss": 0.0}}
+samples_prev = []
+computed_prev = False
 for i in range(100):
+    if len(samples_prev) != 0:
+        next_sample = samples_prev.pop()
+        computed_prev = True
     next_sample_w = to_wrapped_hypers_space(next_sample, params_grid_sample_keys)
     print("next_sample_w = ", next_sample_w)
     data_dict["sample_w"].append(next_sample_w)
@@ -229,13 +234,16 @@ for i in range(100):
     ## write new params json
     write_new_params_json(exapmle_params_file_name, next_sample_w, params_grid, params_grid_sample_keys, folder=os.path.join(os.getcwd(), "json_files"))
 
-    # run fit-alchemical-potential.py script
-    script_py_path = str(os.path.join(path_to_folder_with_fit_script, "fit-alchemical-potential.py"))
-    data_xyz_path = str(os.path.join(path_to_folder_with_fit_script, "data", "data_shuffle.xyz"))
-    params_json_path = str(os.path.join(os.getcwd(), "json_files", prefix + ".json"))
-    cmd = ['python', script_py_path, data_xyz_path, params_json_path, "--device", "cpu"]
-    result = subprocess.run(cmd, stderr = subprocess.PIPE, text = True)
-    print(result.stderr)
+    if computed_prev == False:
+        # run fit-alchemical-potential.py script
+        script_py_path = str(os.path.join(path_to_folder_with_fit_script, "fit-alchemical-potential.py"))
+        data_xyz_path = str(os.path.join(path_to_folder_with_fit_script, "data", "data_shuffle.xyz"))
+        params_json_path = str(os.path.join(os.getcwd(), "json_files", prefix + ".json"))
+        cmd = ['python', script_py_path, data_xyz_path, params_json_path, "--device", "cpu"]
+        result = subprocess.run(cmd, stderr = subprocess.PIPE, text = True)
+        print(result.stderr)
+    else:
+        computed_prev = False
     
     # find f_val as a min of test_mae
     f_val = None
