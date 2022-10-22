@@ -143,7 +143,7 @@ def save_plots(data_dict):
             fig.savefig(figname+'.pdf')
         plt.close('all')
 
-
+optimizer_random_seed = 1
 params_grid = {
     "prefix": {"values": ["example"], "dtype": np.str},
     "learning_rate": {"values": [0.1], "dtype": np.float},
@@ -152,13 +152,11 @@ params_grid = {
     "n_train": {"values": [1000], "dtype": np.int},
     "n_combined_basis": {"values": [4, 6, 8, 10, 12], "dtype": np.int},
     "max_radial": {"values": [4, 6, 8, 10, 12], "dtype": np.int},
-    "composition_regularizer": {"values": [1e-2, 1e-1, 1e0], "dtype": np.float},
-    "radial_spectrum_regularizer": {"values": [1e-2, 1e-1, 1e0], "dtype": np.float},
-    "power_spectrum_regularizer": {"values": [1e-2, 1e-1, 1e0], "dtype": np.float},
-    "power_spectrum_combiner_regularizer": {"values": [0.0, 1e-4, 1e-2, 1e0], "dtype": np.float},
+    "composition_regularizer": {"values": [1e-3, 1e-2, 1e-1, 1e0], "dtype": np.float},
+    "radial_spectrum_regularizer": {"values": [1e-3, 1e-2, 1e-1, 1e0], "dtype": np.float},
+    "power_spectrum_regularizer": {"values": [1e-3, 1e-2, 1e-1, 1e0], "dtype": np.float},
+    "power_spectrum_combiner_regularizer": {"values": [1e-4, 1e-2, 1e0], "dtype": np.float},
     "nn_layer_size": {"values": [0], "dtype": np.int},
-    # "combiner": {"values": ["CombineRadialSpecies", "CombineRadialSpeciesWithAngular",
-    #              "CombineRadialSpeciesWithAngularAdaptBasis", "CombineRadialSpeciesWithAngularAdaptBasisRadial"], "dtype": np.str},
     "combiner": {"values": ["CombineRadialSpecies", "CombineRadialSpeciesWithAngular"], "dtype": np.str},
     "do_gradients": {"values": [False], "dtype": np.bool}
 }
@@ -206,22 +204,33 @@ os.makedirs(os.path.join(os.getcwd(), "json_files"), exist_ok=True)
 path_to_folder_with_fit_script = os.path.join(os.getcwd(), "..", "alchemical-learning")
 exapmle_params_file_name = os.path.join(os.getcwd(), "example.json")
 
-np.random.seed(1234)
+# np.random.seed(1234)
+np.random.seed(optimizer_random_seed)
 hypers_opt = SKOptimizer(hypers_space, "GP", acq_func="EI",
                 acq_optimizer="sampling",
-                initial_point_generator="lhs", n_initial_points=5)
+                initial_point_generator="lhs", n_initial_points=10)
 next_sample = hypers_opt.ask()
 
 data_dict = {"f_val": [], "prefix": [], "sample_w": [], "dataframe":[],
              "min": {"test_mae": 1e100, "train_mae": 1e100, "loss": 1e100},
              "max": {"test_mae": 0.0, "train_mae": 0.0, "loss": 0.0}}
 samples_prev = []
+samples_w_prev = []
 computed_prev = False
 for i in range(100):
     if len(samples_prev) != 0:
         next_sample = samples_prev.pop()
+        next_sample_w = to_wrapped_hypers_space(next_sample, params_grid_sample_keys)
         computed_prev = True
-    next_sample_w = to_wrapped_hypers_space(next_sample, params_grid_sample_keys)
+    elif len(samples_w_prev) != 0:
+        next_sample_w = samples_w_prev.pop()
+        next_sample = to_hypers_space(next_sample_w, params_grid_sample_keys)
+        computed_prev = True
+    else:
+        next_sample_w = to_wrapped_hypers_space(next_sample, params_grid_sample_keys)
+
+    with open('result.txt', 'a') as f:
+        f.write(f"\nNext point: {next_sample_w}")
     print("next_sample_w = ", next_sample_w)
     data_dict["sample_w"].append(next_sample_w)
 
@@ -276,15 +285,17 @@ for i in range(100):
     with open('result.txt', 'w') as f:
         f.write(str(res))
     with open('result.txt', 'a') as f:
+        f.write(f"\nTotal amount of combinations: {total}")
         f.write(f"\nNumber of checked points: {i+1}")
         f.write(f"\nList of prefices and f_vals (test_mae):\n")
         f_val_min = min(data_dict["f_val"])
         for j, prefix in enumerate(data_dict["prefix"]):
             val = data_dict["f_val"][j]
+            sample_w = data_dict["sample_w"][j]
             if val == f_val_min:
-                f.write(f"{j:3}  {prefix}  {val} *min\n")
+                f.write(f"{j:3}  {sample_w}  {prefix}  {val} *min\n")
             else:
-                f.write(f"{j:3}  {prefix}  {val}\n")
+                f.write(f"{j:3}  {sample_w}  {prefix}  {val}\n")
     print("Number of checked points: ", i+1)
     
     next_sample = hypers_opt.ask()
@@ -293,3 +304,8 @@ for i in range(100):
         f_val = res.func_vals[np.min(np.argwhere([v.tolist() == [str(s) for s in next_sample] for v in np.array(res.x_iters)]))]
         res = hypers_opt.tell(next_sample, f_val)
         next_sample = hypers_opt.ask()
+
+    if os.path.isfile('stop_signal.txt'):
+        with open('result.txt', 'a') as f:
+            f.write("\nStopped by stop_signal.txt file")
+        break
