@@ -173,7 +173,7 @@ class AtomisticDataset(torch.utils.data.Dataset):
                 spherical_expansion = calculator.compute(
                     frame, gradients=(["positions", "cell"] if do_gradients else [])
                 )
-                spherical_expansion.keys_to_samples("species_center")
+                # spherical_expansion.keys_to_samples("species_center")
                 spherical_expansion.keys_to_properties(all_neighbor_species)
 
                 self.spherical_expansions.append(

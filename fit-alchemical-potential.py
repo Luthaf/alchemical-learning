@@ -10,7 +10,7 @@ import numpy as np
 import torch
 
 from utils.combine import CombineSpecies, CombineRadialSpecies, CombineRadialSpeciesWithAngular, \
-    CombineRadialSpeciesWithAngularAdaptBasis, CombineRadialSpeciesWithAngularAdaptBasisRadial
+    CombineRadialSpeciesWithAngularAdaptBasis, CombineRadialSpeciesWithAngularAdaptBasisRadial, CombineRadialSpeciesWithCentralSpecies
 from utils.dataset import AtomisticDataset, create_dataloader
 from utils.model import AlchemicalModel
 
@@ -176,48 +176,54 @@ def main(datafile, parameters, device="cpu"):
     COMBINER_TYPE = parameters.get("combiner", "CombineSpecies")
 
     combiner = None
-    # TODO:put seed
-    if COMBINER_TYPE == "CombineSpecies":
-        combiner = CombineSpecies(
-            species=all_species,
-            n_pseudo_species=parameters["n_pseudo_species"],
-            # TODO: remove this from code
-            per_l_max=0
-        )
-    elif COMBINER_TYPE == "CombineRadialSpecies":
-        combiner = CombineRadialSpecies(
-            n_species=len(all_species),
-            max_radial=hypers_ps["max_radial"],
-            n_combined_basis=parameters.get("n_combined_basis", 16),
-            seed=parameters.get("seed")
-        )
-    elif COMBINER_TYPE == "CombineRadialSpeciesWithAngular":
-        combiner = CombineRadialSpeciesWithAngular(
-            n_species=len(all_species),
-            max_radial=hypers_ps["max_radial"],
-            max_angular=hypers_ps["max_angular"],
-            n_combined_basis=parameters.get("n_combined_basis", 16),
-            seed=parameters.get("seed")
-        )
-    elif COMBINER_TYPE == "CombineRadialSpeciesWithAngularAdaptBasis":
-        combiner = CombineRadialSpeciesWithAngularAdaptBasis(
-            n_species=len(all_species),
-            max_radial=hypers_ps["max_radial"],
-            max_angular=hypers_ps["max_angular"],
-            n_combined_basis=parameters.get("n_combined_basis", 16),
-            combined_basis_per_angular=combined_basis_per_angular,
-            seed=parameters.get("seed")
-        )
-    elif COMBINER_TYPE == "CombineRadialSpeciesWithAngularAdaptBasisRadial":
-        combiner = CombineRadialSpeciesWithAngularAdaptBasisRadial(
-            n_species=len(all_species),
-            max_radial=hypers_ps["max_radial"],
-            max_angular=hypers_ps["max_angular"],
-            radial_per_angular=hypers_ps["radial_per_angular"],
-            n_combined_basis=parameters.get("n_combined_basis", 16),
-            combined_basis_per_angular=combined_basis_per_angular,
-            seed=parameters.get("seed")
-        )
+    combiner = CombineRadialSpeciesWithCentralSpecies(
+        # n_species=len(all_species),
+        all_species=all_species,
+        max_radial=hypers_ps["max_radial"],
+        n_combined_basis=parameters.get("n_combined_basis", 16),
+        seed=parameters.get("seed")
+    )
+    # if COMBINER_TYPE == "CombineSpecies":
+    #     combiner = CombineSpecies(
+    #         species=all_species,
+    #         n_pseudo_species=parameters["n_pseudo_species"],
+    #         # TODO: remove this from code
+    #         per_l_max=0
+    #     )
+    # elif COMBINER_TYPE == "CombineRadialSpecies":
+    #     combiner = CombineRadialSpecies(
+    #         n_species=len(all_species),
+    #         max_radial=hypers_ps["max_radial"],
+    #         n_combined_basis=parameters.get("n_combined_basis", 16),
+    #         seed=parameters.get("seed")
+    #     )
+    # elif COMBINER_TYPE == "CombineRadialSpeciesWithAngular":
+    #     combiner = CombineRadialSpeciesWithAngular(
+    #         n_species=len(all_species),
+    #         max_radial=hypers_ps["max_radial"],
+    #         max_angular=hypers_ps["max_angular"],
+    #         n_combined_basis=parameters.get("n_combined_basis", 16),
+    #         seed=parameters.get("seed")
+    #     )
+    # elif COMBINER_TYPE == "CombineRadialSpeciesWithAngularAdaptBasis":
+    #     combiner = CombineRadialSpeciesWithAngularAdaptBasis(
+    #         n_species=len(all_species),
+    #         max_radial=hypers_ps["max_radial"],
+    #         max_angular=hypers_ps["max_angular"],
+    #         n_combined_basis=parameters.get("n_combined_basis", 16),
+    #         combined_basis_per_angular=combined_basis_per_angular,
+    #         seed=parameters.get("seed")
+    #     )
+    # elif COMBINER_TYPE == "CombineRadialSpeciesWithAngularAdaptBasisRadial":
+    #     combiner = CombineRadialSpeciesWithAngularAdaptBasisRadial(
+    #         n_species=len(all_species),
+    #         max_radial=hypers_ps["max_radial"],
+    #         max_angular=hypers_ps["max_angular"],
+    #         radial_per_angular=hypers_ps["radial_per_angular"],
+    #         n_combined_basis=parameters.get("n_combined_basis", 16),
+    #         combined_basis_per_angular=combined_basis_per_angular,
+    #         seed=parameters.get("seed")
+    #     )
 
     COMPOSITION_REGULARIZER = parameters.get("composition_regularizer")
     RADIAL_SPECTRUM_REGULARIZER = parameters.get("radial_spectrum_regularizer")
@@ -316,11 +322,6 @@ def main(datafile, parameters, device="cpu"):
     else:
         output.write("# epoch  train_loss  test_mae test_mae_f\n")
     torch.save(model.state_dict(), f"{prefix}/initial.torch")
-
-    output_params = open(f"{prefix}/log_params.txt", "w")
-    output_params.write("# epoch  test_mae_prev  test_mae")
-    test_mae_prev = 1e100
-    write_params_n_next_steps = 0
 
     high_mem = parameters.get("high_mem", True) # NOTE: Configuration "high_mem = False, n_train_forces != 0" needs to be tested
     if high_mem:
@@ -535,23 +536,6 @@ def main(datafile, parameters, device="cpu"):
                     f"{epoch} {loss.item()} {test_mae.item()} {test_mae_forces.item()}\n"
                 )
             output.flush()
-
-            # if test_mae_prev * 10 < test_mae.item() or write_params_n_next_steps > 0:
-            if False:
-            # if True:
-                write_params_n_next_steps = 5
-                zeros = 0
-                output_params.write(f"\n!! {epoch} {test_mae_prev} {test_mae.item()}")
-                for ii, p in enumerate(model.parameters()):
-                    output_params.write(f"\n! {ii:04d}\n")
-                    for v in p.detach().cpu().numpy().flatten():
-                        output_params.write(f"{v:.5e}  ")
-                        if v == 0.0:
-                            zeros+= 1
-                # output_params.write(f"# zero params = {zeros:03d}  ")
-                output_params.flush()
-            test_mae_prev = test_mae.item()
-            write_params_n_next_steps = max(0, write_params_n_next_steps - 1)
 
             print(
                 f"epoch {epoch} took {epoch_time:.4}s, "

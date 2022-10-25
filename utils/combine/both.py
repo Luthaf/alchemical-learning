@@ -322,3 +322,75 @@ class CombineRadialSpeciesWithAngularAdaptBasisRadial(torch.nn.Module):
             blocks.append(new_block)
 
         return TensorMap(spherical_expansion.keys, blocks)
+
+class CombineRadialSpeciesWithCentralSpecies(torch.nn.Module):
+    def __init__(
+        self,
+        all_species,
+        max_radial,
+        n_combined_basis,
+        seed=None,
+        *,
+        explicit_combining_matrix=None,
+    ):
+        super().__init__()
+        self.all_species = all_species
+        self.n_species = len(all_species)
+        self.max_radial = max_radial
+        self.central_species_index = {s: i for i, s in enumerate(all_species)}
+
+        if explicit_combining_matrix is None:
+            if seed is not None:
+                torch.manual_seed(seed)
+            self.combining_matrix = torch.nn.Parameter(
+                torch.rand((self.n_species, max_radial * self.n_species, n_combined_basis))
+            )
+        else:
+            self.register_buffer("combining_matrix", explicit_combining_matrix)
+
+    def detach(self):
+        return CombineRadialSpeciesWithCentralSpecies(
+            self.all_species,
+            self.max_radial,
+            self.combining_matrix.shape[2],
+            explicit_combining_matrix=self.combining_matrix.clone().detach(),
+        )
+
+    def forward(self, spherical_expansion: TensorMap):
+        assert spherical_expansion.keys.names == ("spherical_harmonics_l","species_center")
+        assert spherical_expansion.property_names == ("species_neighbor", "n")
+
+        _, _, n_combined_basis = self.combining_matrix.shape
+
+        properties = Labels(
+            names=["combined_basis"],
+            values=np.array(
+                [[-n] for n in range(n_combined_basis)],
+                dtype=np.int32,
+            ),
+        )
+
+        blocks = []
+        for key, block in spherical_expansion:
+            cs_i = self.central_species_index[key[1]]
+            new_block = TensorBlock(
+                values=block.values @ self.combining_matrix[cs_i],
+                samples=block.samples,
+                components=block.components,
+                properties=properties,
+            )
+
+            if block.has_gradient("positions"):
+                gradient = block.gradient("positions")
+                new_block.add_gradient(
+                    "positions",
+                    gradient.data @ self.combining_matrix[cs_i],
+                    gradient.samples,
+                    gradient.components,
+                )
+
+            blocks.append(new_block)
+        
+        new_tensor_map = TensorMap(spherical_expansion.keys, blocks)
+        new_tensor_map.keys_to_samples("species_center")
+        return new_tensor_map
