@@ -152,9 +152,9 @@ params_grid = {
     "n_train": {"values": [1000], "dtype": np.int},
     "n_combined_basis": {"values": [4, 6, 8, 10, 12], "dtype": np.int},
     "max_radial": {"values": [4, 6, 8, 10, 12], "dtype": np.int},
-    "composition_regularizer": {"values": [1e-3, 1e-2, 1e-1, 1e0], "dtype": np.float},
-    "radial_spectrum_regularizer": {"values": [1e-3, 1e-2, 1e-1, 1e0], "dtype": np.float},
-    "power_spectrum_regularizer": {"values": [1e-3, 1e-2, 1e-1, 1e0], "dtype": np.float},
+    "composition_regularizer": {"values": [1e-4, 1e-3, 1e-2, 1e-1, 1e0], "dtype": np.float},
+    "radial_spectrum_regularizer": {"values": [1e-4, 1e-3, 1e-2, 1e-1, 1e0], "dtype": np.float},
+    "power_spectrum_regularizer": {"values": [1e-4, 1e-3, 1e-2, 1e-1, 1e0], "dtype": np.float},
     "power_spectrum_combiner_regularizer": {"values": [1e-4, 1e-2, 1e0], "dtype": np.float},
     "nn_layer_size": {"values": [0], "dtype": np.int},
     "combiner": {"values": ["CombineRadialSpecies", "CombineRadialSpeciesWithAngular"], "dtype": np.str},
@@ -204,20 +204,23 @@ os.makedirs(os.path.join(os.getcwd(), "json_files"), exist_ok=True)
 path_to_folder_with_fit_script = os.path.join(os.getcwd(), "..", "alchemical-learning")
 exapmle_params_file_name = os.path.join(os.getcwd(), "example.json")
 
-# np.random.seed(1234)
-np.random.seed(optimizer_random_seed)
-hypers_opt = SKOptimizer(hypers_space, "GP", acq_func="EI",
-                acq_optimizer="sampling",
-                initial_point_generator="lhs", n_initial_points=10)
-next_sample = hypers_opt.ask()
-
 data_dict = {"f_val": [], "prefix": [], "sample_w": [], "dataframe":[],
              "min": {"test_mae": 1e100, "train_mae": 1e100, "loss": 1e100},
              "max": {"test_mae": 0.0, "train_mae": 0.0, "loss": 0.0}}
 samples_prev = []
+# samples_w_prev = [[6, 'CombineRadialSpeciesWithAngular', 0.01, 0.01, 0.01, 0.0001]]
 samples_w_prev = []
-computed_prev = False
+
+# np.random.seed(1234)
+np.random.seed(optimizer_random_seed)
+hypers_opt = SKOptimizer(hypers_space, "GP", acq_func="EI",
+                acq_optimizer="sampling",
+                # initial_point_generator="lhs", n_initial_points=10)
+                initial_point_generator="lhs", n_initial_points=len(samples_w_prev)+1)
+next_sample = hypers_opt.ask()
+
 for i in range(100):
+    computed_prev = False
     if len(samples_prev) != 0:
         next_sample = samples_prev.pop()
         next_sample_w = to_wrapped_hypers_space(next_sample, params_grid_sample_keys)
