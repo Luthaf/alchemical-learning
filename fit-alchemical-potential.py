@@ -229,7 +229,9 @@ def main(datafile, parameters, device="cpu"):
             all_species=all_species,
             max_radial=hypers_ps["max_radial"],
             n_combined_basis=parameters.get("n_combined_basis", 16),
-            n_pseudo_central_species=len(all_species) // 2,
+            n_pseudo_central_species=parameters.get("n_pseudo_central_species", len(all_species))
+                if parameters.get("n_pseudo_central_species", len(all_species)) <= len(all_species)
+                else len(all_species),
             seed=parameters.get("seed")
         )
 
