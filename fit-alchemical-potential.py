@@ -99,12 +99,14 @@ def main(datafile, parameters, device="cpu"):
 
     
     hypers_rs = parameters.get("hypers_rs")
+    species_center_key_to_samples = parameters.get("species_center_key_to_samples", True)
 
     train_dataset = AtomisticDataset(
         train_frames,
         all_species,
         {"radial_spectrum": hypers_rs, "spherical_expansion": hypers_ps},
         train_energies,
+        species_center_key_to_samples=species_center_key_to_samples,
     )
 
     if n_train_forces != 0:
@@ -115,6 +117,7 @@ def main(datafile, parameters, device="cpu"):
             train_f_energies,
             train_f_forces,
             do_gradients=True,
+            species_center_key_to_samples=species_center_key_to_samples,
         )
     else:
         train_forces_dataset_grad = None
@@ -126,6 +129,7 @@ def main(datafile, parameters, device="cpu"):
         test_energies,
         test_forces,
         do_gradients=parameters.get("do_gradients", True),
+        species_center_key_to_samples=species_center_key_to_samples,
     )
 
     # --------- DATA LOADERS --------- #
@@ -173,57 +177,61 @@ def main(datafile, parameters, device="cpu"):
         device=device,
     )
     
-    COMBINER_TYPE = parameters.get("combiner", "CombineSpecies")
+    COMBINER_TYPE = parameters.get("combiner", "CombineRadialSpecies")
+    assert (species_center_key_to_samples == False) == (COMBINER_TYPE in ["CombineRadialSpeciesWithCentralSpecies"])
 
     combiner = None
-    combiner = CombineRadialSpeciesWithCentralSpecies(
-        # n_species=len(all_species),
-        all_species=all_species,
-        max_radial=hypers_ps["max_radial"],
-        n_combined_basis=parameters.get("n_combined_basis", 16),
-        seed=parameters.get("seed")
-    )
-    # if COMBINER_TYPE == "CombineSpecies":
-    #     combiner = CombineSpecies(
-    #         species=all_species,
-    #         n_pseudo_species=parameters["n_pseudo_species"],
-    #         # TODO: remove this from code
-    #         per_l_max=0
-    #     )
-    # elif COMBINER_TYPE == "CombineRadialSpecies":
-    #     combiner = CombineRadialSpecies(
-    #         n_species=len(all_species),
-    #         max_radial=hypers_ps["max_radial"],
-    #         n_combined_basis=parameters.get("n_combined_basis", 16),
-    #         seed=parameters.get("seed")
-    #     )
-    # elif COMBINER_TYPE == "CombineRadialSpeciesWithAngular":
-    #     combiner = CombineRadialSpeciesWithAngular(
-    #         n_species=len(all_species),
-    #         max_radial=hypers_ps["max_radial"],
-    #         max_angular=hypers_ps["max_angular"],
-    #         n_combined_basis=parameters.get("n_combined_basis", 16),
-    #         seed=parameters.get("seed")
-    #     )
-    # elif COMBINER_TYPE == "CombineRadialSpeciesWithAngularAdaptBasis":
-    #     combiner = CombineRadialSpeciesWithAngularAdaptBasis(
-    #         n_species=len(all_species),
-    #         max_radial=hypers_ps["max_radial"],
-    #         max_angular=hypers_ps["max_angular"],
-    #         n_combined_basis=parameters.get("n_combined_basis", 16),
-    #         combined_basis_per_angular=combined_basis_per_angular,
-    #         seed=parameters.get("seed")
-    #     )
-    # elif COMBINER_TYPE == "CombineRadialSpeciesWithAngularAdaptBasisRadial":
-    #     combiner = CombineRadialSpeciesWithAngularAdaptBasisRadial(
-    #         n_species=len(all_species),
-    #         max_radial=hypers_ps["max_radial"],
-    #         max_angular=hypers_ps["max_angular"],
-    #         radial_per_angular=hypers_ps["radial_per_angular"],
-    #         n_combined_basis=parameters.get("n_combined_basis", 16),
-    #         combined_basis_per_angular=combined_basis_per_angular,
-    #         seed=parameters.get("seed")
-    #     )
+    if COMBINER_TYPE == "CombineSpecies":
+        combiner = CombineSpecies(
+            species=all_species,
+            n_pseudo_species=parameters["n_pseudo_species"],
+            # TODO: remove this from code
+            per_l_max=0
+        )
+    elif COMBINER_TYPE == "CombineRadialSpecies":
+        combiner = CombineRadialSpecies(
+            n_species=len(all_species),
+            max_radial=hypers_ps["max_radial"],
+            n_combined_basis=parameters.get("n_combined_basis", 16),
+            seed=parameters.get("seed")
+        )
+    elif COMBINER_TYPE == "CombineRadialSpeciesWithAngular":
+        combiner = CombineRadialSpeciesWithAngular(
+            n_species=len(all_species),
+            max_radial=hypers_ps["max_radial"],
+            max_angular=hypers_ps["max_angular"],
+            n_combined_basis=parameters.get("n_combined_basis", 16),
+            seed=parameters.get("seed")
+        )
+    elif COMBINER_TYPE == "CombineRadialSpeciesWithAngularAdaptBasis":
+        combiner = CombineRadialSpeciesWithAngularAdaptBasis(
+            n_species=len(all_species),
+            max_radial=hypers_ps["max_radial"],
+            max_angular=hypers_ps["max_angular"],
+            n_combined_basis=parameters.get("n_combined_basis", 16),
+            combined_basis_per_angular=combined_basis_per_angular,
+            seed=parameters.get("seed")
+        )
+    elif COMBINER_TYPE == "CombineRadialSpeciesWithAngularAdaptBasisRadial":
+        combiner = CombineRadialSpeciesWithAngularAdaptBasisRadial(
+            n_species=len(all_species),
+            max_radial=hypers_ps["max_radial"],
+            max_angular=hypers_ps["max_angular"],
+            radial_per_angular=hypers_ps["radial_per_angular"],
+            n_combined_basis=parameters.get("n_combined_basis", 16),
+            combined_basis_per_angular=combined_basis_per_angular,
+            seed=parameters.get("seed")
+        )
+    elif COMBINER_TYPE == "CombineRadialSpeciesWithCentralSpecies":
+        assert species_center_key_to_samples == False
+        combiner = CombineRadialSpeciesWithCentralSpecies(
+            # n_species=len(all_species),
+            all_species=all_species,
+            max_radial=hypers_ps["max_radial"],
+            n_combined_basis=parameters.get("n_combined_basis", 16),
+            n_pseudo_central_species=len(all_species) // 2,
+            seed=parameters.get("seed")
+        )
 
     COMPOSITION_REGULARIZER = parameters.get("composition_regularizer")
     RADIAL_SPECTRUM_REGULARIZER = parameters.get("radial_spectrum_regularizer")

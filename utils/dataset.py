@@ -84,6 +84,7 @@ class AtomisticDataset(torch.utils.data.Dataset):
         forces=None,
         normalization=None,
         do_gradients=False,
+        species_center_key_to_samples=True
     ):
         all_neighbor_species = Labels(
             names=["species_neighbor"],
@@ -158,7 +159,8 @@ class AtomisticDataset(torch.utils.data.Dataset):
                     spherical_expansion = calculator.compute(
                         frame, gradients=(["positions", "cell"] if do_gradients else [])
                     )
-                    spherical_expansion.keys_to_samples("species_center")
+                    if species_center_key_to_samples:
+                        spherical_expansion.keys_to_samples("species_center")
                     spherical_expansion.keys_to_properties(all_neighbor_species)
                     spherical_expansion_by_l[l] = spherical_expansion
 
@@ -173,7 +175,8 @@ class AtomisticDataset(torch.utils.data.Dataset):
                 spherical_expansion = calculator.compute(
                     frame, gradients=(["positions", "cell"] if do_gradients else [])
                 )
-                # spherical_expansion.keys_to_samples("species_center")
+                if species_center_key_to_samples:
+                    spherical_expansion.keys_to_samples("species_center")
                 spherical_expansion.keys_to_properties(all_neighbor_species)
 
                 self.spherical_expansions.append(
