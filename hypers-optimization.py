@@ -178,7 +178,8 @@ short_names_map = {
     "CombineRadialSpecies": "RS",
     "CombineRadialSpeciesWithAngular": "RSL",
     "CombineRadialSpeciesWithAngularAdaptBasis": "RSLAB",
-    "CombineRadialSpeciesWithAngularAdaptBasisRadial": "RSLABR"
+    "CombineRadialSpeciesWithAngularAdaptBasisRadial": "RSLABR",
+    "CombineRadialSpeciesWithCentralSpecies": "RSCS"
 }
 
 params_grid_sample_keys = ["n_combined_basis", "max_radial", "combiner", "composition_regularizer", "radial_spectrum_regularizer",
