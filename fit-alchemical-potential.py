@@ -77,7 +77,7 @@ def main(datafile, parameters, device="cpu"):
         print("Please, set a new list of species in the json file!")
         print("Try to put the following line in the json file:")
         print("\t\"species\": ", all_species_from_data, ",", sep='')
-        return
+        sys.exit(1)
 
     train_frames = frames[:n_train]
     train_forces_frames = frames[n_train : n_train + n_train_forces]
