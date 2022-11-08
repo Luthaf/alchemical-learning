@@ -62,13 +62,24 @@ def main(datafile, parameters, device="cpu"):
     n_train = parameters["n_train"]
     n_train_forces = parameters["n_train_forces"]
     do_gradients = parameters.get("do_gradients", True)
+    all_species = parameters.get("species", [])
+    if len(all_species) == 0:
+        print("Warning: A list of species is not found! Please, set it in the json file!")
 
     frames = ase.io.read(datafile, ":")
-    all_species = set()
+    all_species_from_data = set()
     for frame in frames:
-        all_species.update(frame.numbers)
-    all_species = list(map(lambda u: int(u), all_species))
-    print("All species ", all_species)
+        all_species_from_data.update(frame.numbers)
+    all_species_from_data = list(map(lambda u: int(u), all_species_from_data))
+
+    if set(all_species_from_data).issubset(all_species):
+        print("All species ", all_species)
+    else:
+        print("Warning: Not all species from data are found in the json file!")
+        print("Please, set a new list of species in the json file!")
+        print("Try to put the following line in the json file:")
+        print("\t\"species\": ", all_species_from_data, ",", sep='')
+        return
 
     train_frames = frames[:n_train]
     train_forces_frames = frames[n_train : n_train + n_train_forces]
