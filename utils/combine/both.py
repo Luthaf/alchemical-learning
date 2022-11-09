@@ -480,11 +480,12 @@ class CombineSpeciesWithCentralSpecies(torch.nn.Module):
         assert spherical_expansion.property_names == ("species_neighbor", "n")
 
         l_channels, n_pseudo_c_species, n_species, n_pseudo_n_species = self.combining_matrix.shape
+        n_radial = self.max_radial
 
         properties = Labels(
             names=["species_neighbor", "n"],
             values=np.array(
-                [[-s, n] for s in range(n_pseudo_n_species) for n in self.max_radial],
+                [[-s, n] for s in range(n_pseudo_n_species) for n in range(n_radial)],
                 dtype=np.int32,
             ),
         )
