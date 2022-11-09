@@ -375,7 +375,7 @@ class CombineRadialSpeciesWithCentralSpecies(torch.nn.Module):
         )
 
     def forward(self, spherical_expansion: TensorMap):
-        assert spherical_expansion.keys.names == ("spherical_harmonics_l","species_center")
+        assert spherical_expansion.keys.names == ("spherical_harmonics_l", "species_center")
         assert spherical_expansion.property_names == ("species_neighbor", "n")
 
         _, _, n_combined_basis = self.combining_matrix.shape
@@ -473,10 +473,10 @@ class CombineSpeciesWithCentralSpecies(torch.nn.Module):
         )
 
     def forward(self, spherical_expansion: TensorMap):
-        assert spherical_expansion.keys.names == ("spherical_harmonics_l",)
+        assert spherical_expansion.keys.names == ("spherical_harmonics_l", "species_center")
         assert spherical_expansion.property_names == ("species_neighbor", "n")
 
-        n_pseudo_c_species, n_species, n_pseudo_n_species = self.combining_matrix.shape
+        l_channels, n_pseudo_c_species, n_species, n_pseudo_n_species = self.combining_matrix.shape
 
         if self.linear_params is None:
             species_combining_matrix = self.combining_matrix
@@ -488,7 +488,7 @@ class CombineSpeciesWithCentralSpecies(torch.nn.Module):
         for key, block in spherical_expansion:
             cs_i = self.species_remapping[key["species_center"]]
             l = key["spherical_harmonics_l"]
-            if self.l_channels == 1:
+            if l_channels == 1:
                 combining_matrix = species_combining_matrix[0]
             else:  # l-dependent combination matrix
                 combining_matrix = species_combining_matrix[l]
