@@ -251,6 +251,7 @@ def main(datafile, parameters, device="cpu"):
         assert species_center_key_to_samples == False
         combiner = CombineSpeciesWithCentralSpecies(
             all_species,
+            hypers_ps["max_radial"],
             parameters["n_pseudo_species"],
             n_pseudo_central_species=parameters.get("n_pseudo_central_species", len(all_species))
                 if parameters.get("n_pseudo_central_species", len(all_species)) <= len(all_species)

@@ -425,6 +425,7 @@ class CombineSpeciesWithCentralSpecies(torch.nn.Module):
     def __init__(
         self,
         all_species,
+        max_radial,
         n_pseudo_neighbor_species,
         n_pseudo_central_species=None,
         seed=None,
@@ -435,6 +436,7 @@ class CombineSpeciesWithCentralSpecies(torch.nn.Module):
         super().__init__()
         self.all_species = all_species
         self.n_species = len(all_species)
+        self.max_radial = max_radial
         self.n_pseudo_neighbor_species = n_pseudo_neighbor_species
         self.species_remapping = {species: i for i, species in enumerate(all_species)}
         #TODO: extend to L more than 1
@@ -464,6 +466,7 @@ class CombineSpeciesWithCentralSpecies(torch.nn.Module):
     def detach(self):
         return CombineSpeciesWithCentralSpecies(
             self.all_species,
+            self.max_radial,
             self.n_pseudo_neighbor_species,
             self.n_pseudo_central_species,
             explicit_linear_params=None
@@ -477,6 +480,14 @@ class CombineSpeciesWithCentralSpecies(torch.nn.Module):
         assert spherical_expansion.property_names == ("species_neighbor", "n")
 
         l_channels, n_pseudo_c_species, n_species, n_pseudo_n_species = self.combining_matrix.shape
+
+        properties = Labels(
+            names=["species_neighbor", "n"],
+            values=np.array(
+                [[-s, n] for s in range(n_pseudo_n_species) for n in self.max_radial],
+                dtype=np.int32,
+            ),
+        )
 
         if self.linear_params is None:
             species_combining_matrix = self.combining_matrix
@@ -493,16 +504,16 @@ class CombineSpeciesWithCentralSpecies(torch.nn.Module):
             else:  # l-dependent combination matrix
                 combining_matrix = species_combining_matrix[l]
 
-            #NOTE: leave making 'properties' here for further extension
-            radial = np.unique(block.properties["n"])
-            n_radial = len(radial)
-            properties = Labels(
-                names=["species_neighbor", "n"],
-                values=np.array(
-                    [[-s, n] for s in range(n_pseudo_n_species) for n in radial],
-                    dtype=np.int32,
-                ),
-            )
+            # #NOTE: leave making 'properties' here for further extension
+            # radial = np.unique(block.properties["n"])
+            # n_radial = len(radial)
+            # properties = Labels(
+            #     names=["species_neighbor", "n"],
+            #     values=np.array(
+            #         [[-s, n] for s in range(n_pseudo_n_species) for n in radial],
+            #         dtype=np.int32,
+            #     ),
+            # )
 
             n_samples, n_components, _ = block.values.shape
             data = block.values.reshape(n_samples, n_components, n_species, n_radial)
