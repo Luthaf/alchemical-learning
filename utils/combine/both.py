@@ -418,3 +418,141 @@ class CombineRadialSpeciesWithCentralSpecies(torch.nn.Module):
         new_tensor_map = TensorMap(spherical_expansion.keys, blocks)
         new_tensor_map.keys_to_samples("species_center")
         return new_tensor_map
+
+class CombineSpeciesWithCentralSpecies(torch.nn.Module):
+    # This combiner does not support L-dependent combination matrices
+    # self.linear_params are common for any L
+    def __init__(
+        self,
+        all_species,
+        n_pseudo_neighbor_species,
+        n_pseudo_central_species=None,
+        seed=None,
+        *,
+        explicit_linear_params=None,
+        explicit_combining_matrix=None,
+    ):
+        super().__init__()
+        self.all_species = all_species
+        self.n_species = len(all_species)
+        self.n_pseudo_neighbor_species = n_pseudo_neighbor_species
+        self.species_remapping = {species: i for i, species in enumerate(all_species)}
+        #TODO: extend to L more than 1
+        self.l_channels = 1
+
+        if n_pseudo_central_species is None:
+            self.n_pseudo_central_species = self.n_species
+        else:
+            self.n_pseudo_central_species = min(n_pseudo_central_species, self.n_species)
+        
+        if self.n_pseudo_central_species == self.n_species:
+            self.linear_params = None
+        elif explicit_linear_params is None:
+            self.linear_params = torch.nn.Parameter(torch.rand((self.n_species, self.n_pseudo_central_species)))
+        else:
+            self.register_buffer("linear_params", explicit_linear_params)
+
+        if explicit_combining_matrix is None:
+            if seed is not None:
+                torch.manual_seed(seed)
+            self.combining_matrix = torch.nn.Parameter(
+                torch.rand((self.l_channels, self.n_pseudo_central_species, self.n_species, self.n_pseudo_neighbor_species))
+            )
+        else:
+            self.register_buffer("combining_matrix", explicit_combining_matrix)
+
+    def detach(self):
+        return CombineSpeciesWithCentralSpecies(
+            self.all_species,
+            self.n_pseudo_neighbor_species,
+            self.n_pseudo_central_species,
+            explicit_linear_params=None
+                if self.linear_params is None
+                else self.linear_params.clone().detach(),
+            explicit_combining_matrix=self.combining_matrix.clone().detach(),
+        )
+
+    def forward(self, spherical_expansion: TensorMap):
+        assert spherical_expansion.keys.names == ("spherical_harmonics_l",)
+        assert spherical_expansion.property_names == ("species_neighbor", "n")
+
+        n_pseudo_c_species, n_species, n_pseudo_n_species = self.combining_matrix.shape
+
+        if self.linear_params is None:
+            species_combining_matrix = self.combining_matrix
+        else:
+            species_combining_matrix = self.combining_matrix.swapaxes(1, 2)
+            species_combining_matrix = (self.linear_params @ species_combining_matrix).swapaxes(1, 2)
+
+        blocks = []
+        for key, block in spherical_expansion:
+            cs_i = self.species_remapping[key["species_center"]]
+            l = key["spherical_harmonics_l"]
+            if self.l_channels == 1:
+                combining_matrix = species_combining_matrix[0]
+            else:  # l-dependent combination matrix
+                combining_matrix = species_combining_matrix[l]
+
+            #NOTE: leave making 'properties' here for further extension
+            radial = np.unique(block.properties["n"])
+            n_radial = len(radial)
+            properties = Labels(
+                names=["species_neighbor", "n"],
+                values=np.array(
+                    [[-s, n] for s in range(n_pseudo_n_species) for n in radial],
+                    dtype=np.int32,
+                ),
+            )
+
+            n_samples, n_components, _ = block.values.shape
+            data = block.values.reshape(n_samples, n_components, n_species, n_radial)
+
+            data = data.swapaxes(-1, -2)
+            data = data @ combining_matrix[cs_i]
+
+            data = data.swapaxes(-1, -2)
+            data = data.reshape(n_samples, n_components, n_radial * n_pseudo_n_species)
+
+            new_block = TensorBlock(
+                values=data,
+                samples=block.samples,
+                components=block.components,
+                properties=properties,
+            )
+
+            if block.has_gradient("positions"):
+                gradient = block.gradient("positions")
+
+                n_grad_samples, n_cartesian, n_spherical, _ = gradient.data.shape
+
+                data = gradient.data.reshape(
+                    n_grad_samples,
+                    n_cartesian,
+                    n_spherical,
+                    n_species,
+                    n_radial,
+                )
+
+                data = data.swapaxes(-1, -2)
+                data = data @ combining_matrix[cs_i]
+
+                data = data.swapaxes(-1, -2)
+                data = data.reshape(
+                    n_grad_samples,
+                    n_cartesian,
+                    n_spherical,
+                    n_radial * n_pseudo_n_species,
+                )
+
+                new_block.add_gradient(
+                    "positions",
+                    data,
+                    gradient.samples,
+                    gradient.components,
+                )
+
+            blocks.append(new_block)
+
+        new_tensor_map = TensorMap(spherical_expansion.keys, blocks)
+        new_tensor_map.keys_to_samples("species_center")
+        return new_tensor_map

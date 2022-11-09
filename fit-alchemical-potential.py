@@ -10,7 +10,8 @@ import numpy as np
 import torch
 
 from utils.combine import CombineSpecies, CombineRadialSpecies, CombineRadialSpeciesWithAngular, \
-    CombineRadialSpeciesWithAngularAdaptBasis, CombineRadialSpeciesWithAngularAdaptBasisRadial, CombineRadialSpeciesWithCentralSpecies
+    CombineRadialSpeciesWithAngularAdaptBasis, CombineRadialSpeciesWithAngularAdaptBasisRadial, \
+    CombineRadialSpeciesWithCentralSpecies, CombineSpeciesWithCentralSpecies
 from utils.dataset import AtomisticDataset, create_dataloader
 from utils.model import AlchemicalModel
 
@@ -190,7 +191,7 @@ def main(datafile, parameters, device="cpu"):
     )
     
     COMBINER_TYPE = parameters.get("combiner", "CombineRadialSpecies")
-    assert (species_center_key_to_samples == False) == (COMBINER_TYPE in ["CombineRadialSpeciesWithCentralSpecies"])
+    assert (species_center_key_to_samples == False) == (COMBINER_TYPE in ["CombineRadialSpeciesWithCentralSpecies", "CombineSpeciesWithCentralSpecies"])
 
     combiner = None
     if COMBINER_TYPE == "CombineSpecies":
@@ -241,6 +242,16 @@ def main(datafile, parameters, device="cpu"):
             all_species=all_species,
             max_radial=hypers_ps["max_radial"],
             n_combined_basis=parameters.get("n_combined_basis", 16),
+            n_pseudo_central_species=parameters.get("n_pseudo_central_species", len(all_species))
+                if parameters.get("n_pseudo_central_species", len(all_species)) <= len(all_species)
+                else len(all_species),
+            seed=parameters.get("seed")
+        )
+    elif COMBINER_TYPE == "CombineSpeciesWithCentralSpecies":
+        assert species_center_key_to_samples == False
+        combiner = CombineSpeciesWithCentralSpecies(
+            all_species,
+            parameters["n_pseudo_species"],
             n_pseudo_central_species=parameters.get("n_pseudo_central_species", len(all_species))
                 if parameters.get("n_pseudo_central_species", len(all_species)) <= len(all_species)
                 else len(all_species),
