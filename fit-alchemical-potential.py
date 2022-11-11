@@ -2,6 +2,8 @@ import argparse
 import json
 import os
 import sys
+from time import strftime
+from time import gmtime
 import time
 from datetime import datetime
 
@@ -11,7 +13,7 @@ import torch
 
 from utils.combine import CombineSpecies, CombineRadialSpecies, CombineRadialSpeciesWithAngular, \
     CombineRadialSpeciesWithAngularAdaptBasis, CombineRadialSpeciesWithAngularAdaptBasisRadial, \
-    CombineRadialSpeciesWithCentralSpecies, CombineSpeciesWithCentralSpecies
+    CombineRadialSpeciesWithCentralSpecies, CombineSpeciesWithCentralSpecies, CombineRadialNeighSpeciesAndCentralSpecies
 from utils.dataset import AtomisticDataset, create_dataloader
 from utils.model import AlchemicalModel
 
@@ -353,7 +355,7 @@ def main(datafile, parameters, device="cpu"):
     if parameters.get("scheduler", False):
         output.write("# epoch  train_loss  test_mae test_mae_f  curr_lr\n")
     else:
-        output.write("# epoch  train_loss  test_mae test_mae_f\n")
+        output.write("# epoch  train_loss  test_mae test_mae_f  epoch_plus_test_time  total_time\n")
     torch.save(model.state_dict(), f"{prefix}/initial.torch")
 
     high_mem = parameters.get("high_mem", True) # NOTE: Configuration "high_mem = False, n_train_forces != 0" needs to be tested
@@ -386,6 +388,7 @@ def main(datafile, parameters, device="cpu"):
         lambda1 = lambda x: (1.0 + np.cos(10*(1+x)/np.pi/(n_epochs - n_epochs_already_done)))/2
         scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda1)
 
+    total_time = 0.0
     for epoch in range(n_epochs_already_done, n_epochs):
         print("Beginning epoch", epoch)
         epoch_start = time.time()
@@ -567,8 +570,13 @@ def main(datafile, parameters, device="cpu"):
                     f"{epoch} {loss.item()} {test_mae.item()} {test_mae_forces.item()} {curr_lr}\n"
                 )
             else:
+                epoch_plus_test_time = time.time() - epoch_start
+                total_time+= epoch_plus_test_time
+                str_total_time = strftime("%d-%H:%M:%S", gmtime(int(total_time)))
+                # reduce the number of days by one
+                str_total_time = f"{(int(str_total_time[:2]) - 1):02d}" + str_total_time[2:]
                 output.write(
-                    f"{epoch} {loss.item()} {test_mae.item()} {test_mae_forces.item()}\n"
+                    f"{epoch} {loss.item()} {test_mae.item()} {test_mae_forces.item()} {epoch_plus_test_time:.4} {str_total_time}\n"
                 )
             output.flush()
 
