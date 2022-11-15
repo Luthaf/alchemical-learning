@@ -13,7 +13,7 @@ import torch
 
 from utils.combine import CombineSpecies, CombineRadialSpecies, CombineRadialSpeciesWithAngular, \
     CombineRadialSpeciesWithAngularAdaptBasis, CombineRadialSpeciesWithAngularAdaptBasisRadial, \
-    CombineRadialSpeciesWithCentralSpecies, CombineSpeciesWithCentralSpecies#, CombineRadialNeighSpeciesAndCentralSpecies
+    CombineRadialSpeciesWithCentralSpecies, CombineSpeciesWithCentralSpecies
 from utils.dataset import AtomisticDataset, create_dataloader
 from utils.model import AlchemicalModel
 
@@ -98,7 +98,6 @@ def main(datafile, parameters, device="cpu"):
     )
 
     print("Computing representations")
-    # hypers_ps = parameters["hypers_ps"]
     hypers_ps = parameters["hypers_ps"].copy()
     
     if "radial_per_angular" in hypers_ps:

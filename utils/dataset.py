@@ -59,7 +59,8 @@ def _move_to_torch_by_l(tensor_maps, structure_i):
     keys = []
     blocks = []
     for l, tensor_map in tensor_maps.items():
-        l_blocks = tensor_map.block(spherical_harmonics_l=l)
+        # l_blocks = tensor_map.block(spherical_harmonics_l=l)
+        l_blocks = tensor_map.blocks(spherical_harmonics_l=l)
         if not hasattr(l_blocks, "__len__"):
             l_blocks = [l_blocks]
         l_keys = tensor_map.keys[
