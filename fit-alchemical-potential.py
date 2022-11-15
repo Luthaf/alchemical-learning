@@ -13,7 +13,7 @@ import torch
 
 from utils.combine import CombineSpecies, CombineRadialSpecies, CombineRadialSpeciesWithAngular, \
     CombineRadialSpeciesWithAngularAdaptBasis, CombineRadialSpeciesWithAngularAdaptBasisRadial, \
-    CombineRadialSpeciesWithCentralSpecies, CombineSpeciesWithCentralSpecies, CombineRadialNeighSpeciesAndCentralSpecies
+    CombineRadialSpeciesWithCentralSpecies, CombineSpeciesWithCentralSpecies#, CombineRadialNeighSpeciesAndCentralSpecies
 from utils.dataset import AtomisticDataset, create_dataloader
 from utils.model import AlchemicalModel
 
