@@ -1,5 +1,6 @@
 """Generic calculator-style interface for MD"""
 import json
+import sys
 
 import ase.io
 import torch
@@ -13,35 +14,6 @@ torch.set_default_dtype(torch.float64)
 
 
 device = "cpu"
-
-all_species = [
-    21,
-    22,
-    23,
-    24,
-    25,
-    26,
-    27,
-    28,
-    29,
-    30,
-    39,
-    40,
-    41,
-    42,
-    44,
-    45,
-    46,
-    47,
-    71,
-    72,
-    73,
-    74,
-    77,
-    78,
-    79,
-]
-
 
 class GenericMDCalculator:
 
@@ -89,6 +61,12 @@ class GenericMDCalculator:
 
         if "hypers_rs" in self._params:
             self.hypers["radial_spectrum"] = self._params["hypers_rs"]
+        all_species = self._params.get("species")
+        if all_species is None:
+            print("Error: A list of species is not found! Please, set it in the json file!")
+            print("\tFor example:")
+            print("\t\"species\": [21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 39, 40, 41, 42, 44, 45, 46, 47, 71, 72, 73, 74, 77, 78, 79],")
+            sys.exit(1)
 
         self._dataset = AtomisticDataset(
             [self.atoms],
