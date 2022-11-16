@@ -4,6 +4,7 @@ from utils.linear import LinearModel
 from utils.nonlinear import NNModel
 from utils.operations import SumStructures, remove_gradient
 from utils.soap import PowerSpectrum
+from time import time
 
 # only profile when required
 try:
@@ -93,6 +94,9 @@ class AlchemicalModel(torch.nn.Module):
                     )
                 self.nn_model = NNModel(nn_layer_size)
 
+        self._neval = 0        
+        self._timings = dict(fw_comp = 0.0, fw_pair = 0.0, fw_ps = 0.0, fw_nn = 0.0)
+
     @profile
     def forward(
         self,
@@ -114,11 +118,14 @@ class AlchemicalModel(torch.nn.Module):
         forces = None
 
         if self.composition_model is not None:
+            self._timings["fw_comp"] -= time()
             energies_cmp, _ = self.composition_model(composition)
             energies += energies_cmp
+            self._timings["fw_comp"] += time()            
 
         if self.radial_spectrum_model is not None:
             # Radial spectrum is already summed per-structure
+            self._timings["fw_pair"] -= time()
             radial_spectrum_per_structure = radial_spectrum
             energies_rs, forces_rs = self.radial_spectrum_model(
                 radial_spectrum_per_structure, with_forces=forward_forces
@@ -131,8 +138,12 @@ class AlchemicalModel(torch.nn.Module):
                     forces = forces_rs
                 else:
                     forces += forces_rs
-
+                    
+            self._timings["fw_pair"] += time()                    
+        
         if self.power_spectrum_model is not None:
+
+            self._timings["fw_ps"] -= time()        
             power_spectrum = self.power_spectrum(spherical_expansion)
             power_spectrum_per_structure = self.sum_structure(power_spectrum)
 
@@ -147,8 +158,10 @@ class AlchemicalModel(torch.nn.Module):
                     forces = forces_ps
                 else:
                     forces += forces_ps
-
+            self._timings["fw_ps"] += time()        
+            
             if self.nn_model is not None:
+                self._timings["fw_nn"] -= time()                    
                 nn_energies, nn_forces = self.nn_model(
                     power_spectrum, with_forces=forward_forces
                 )
@@ -158,7 +171,9 @@ class AlchemicalModel(torch.nn.Module):
                     forces = nn_forces
                 else:
                     forces += nn_forces
+                self._timings["fw_nn"] += time()                    
 
+        self._neval += 1                
         return energies, forces
 
     def initialize_model_weights(

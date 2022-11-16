@@ -153,6 +153,7 @@ class AtomisticDataset(torch.utils.data.Dataset):
                 new_hypers = copy.deepcopy(hypers_spherical_expansion)
                 new_hypers["max_angular"] = l
                 new_hypers["max_radial"] = n
+                new_hypers["single_l"] = True
                 self.spherical_expansion_calculator[l] = Calculator(
                     SphericalExpansion(**new_hypers)
                 )
@@ -191,28 +192,72 @@ class AtomisticDataset(torch.utils.data.Dataset):
             system,
             keep_forward_grad=self.do_gradients,
         )
-        spherical_expansion.keys_to_properties(self._all_center_species)
-
+        
         # TODO: these don't hurt, but are confusing, let's remove them
+        spherical_expansion.keys_to_properties(self._all_neighbor_species)
+        spherical_expansion.keys_to_properties(self._all_center_species)
         spherical_expansion.components_to_properties("spherical_harmonics_m")
         spherical_expansion.keys_to_properties("spherical_harmonics_l")
-        spherical_expansion.keys_to_properties(self._all_neighbor_species)
+        
 
         return self.sum_structures(_move_to_torch(spherical_expansion, system_i))
 
     def compute_spherical_expansion(self, system, system_i):
         if isinstance(self.spherical_expansion_calculator, dict):
             spherical_expansion_by_l = {}
+
+            lkeys = []; lblocks = []
             for l, calculator in self.spherical_expansion_calculator.items():
+
+                start = time()                
                 spherical_expansion = calculator(
                     system,
                     keep_forward_grad=self.do_gradients,
                 )
-                spherical_expansion.keys_to_samples("species_center")
-                spherical_expansion.keys_to_properties(self._all_neighbor_species)
-                spherical_expansion_by_l[l] = spherical_expansion
+                """
+def _move_to_torch_by_l(tensor_maps, structure_i):
+    keys = []
+    blocks = []
+    for l, tensor_map in tensor_maps.items():
+        l_blocks = tensor_map.block(spherical_harmonics_l=l)
+        if not hasattr(l_blocks, "__len__"):
+            l_blocks = [l_blocks]
+        l_keys = tensor_map.keys[
+            np.where(tensor_map.keys["spherical_harmonics_l"] == l)[0]
+        ]
+        for k, b in zip(l_keys, l_blocks):
+            keys.append(tuple(k))
+            blocks.append(_block_to_torch(b, structure_i))
 
-            return _move_to_torch_by_l(spherical_expansion_by_l, system_i)
+    return TensorMap(
+        Labels(tensor_map.keys.names, np.asarray(keys, dtype=np.int32)), blocks
+    )
+                """
+                lnames = spherical_expansion.keys.names
+                #print(spherical_expansion.keys, spherical_expansion.keys.names, l)
+                for lk, lb in spherical_expansion:                    
+                    if lk["spherical_harmonics_l"]==l:
+                        lkeys.append(tuple(lk));
+                        lblocks.append(lb.copy())
+
+                print ("calc ", time()-start)
+                #start = time()                
+                #spherical_expansion.keys_to_samples("species_center")
+                #spherical_expansion.keys_to_properties(self._all_neighbor_species)
+                #print ("keys_move ", time()-start)
+                #spherical_expansion_by_l[l] = spherical_expansion
+            start = time()                                            
+            spherical_expansion_sel = TensorMap(keys=Labels(names=lnames, values=np.asarray(lkeys, dtype=np.int32)),
+                    blocks=lblocks
+                    )
+            spherical_expansion_sel.keys_to_samples("species_center")
+            spherical_expansion_sel.keys_to_properties(self._all_neighbor_species)            
+            print("combined move", time()-start)
+            return _move_to_torch(spherical_expansion_sel, system_i)
+            start = time()
+            m2t = _move_to_torch_by_l(spherical_expansion_by_l, system_i)
+            print("totorch ", time()-start)
+            return m2t
         else:
             spherical_expansion = self.spherical_expansion_calculator(
                 system,
@@ -222,6 +267,7 @@ class AtomisticDataset(torch.utils.data.Dataset):
             spherical_expansion.keys_to_properties(self._all_neighbor_species)
 
             return _move_to_torch(spherical_expansion, system_i)
+#pot, force, stress [[-992.09006198]] (125, 3) (3, 3)
 
     def __len__(self):
         return len(self.composition)

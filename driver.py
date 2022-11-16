@@ -9,6 +9,8 @@ from utils.combine import CombineSpecies
 from utils.dataset import AtomisticDataset, create_dataloader
 from utils.model import AlchemicalModel
 
+from time import time
+
 torch.set_default_dtype(torch.float64)
 
 
@@ -62,6 +64,8 @@ class GenericMDCalculator:
         starting_frame=None,
     ):
         super().__init__()
+        self._neval = 0
+        self._timings = dict(fw_model = 0.0, bw_model = 0.0)
 
         if structure_template is not None:
             self.template_filename = structure_template
@@ -76,7 +80,7 @@ class GenericMDCalculator:
 
         with open(model_parameters_path) as fd:
             self._params = json.load(fd)
-
+        print("NUM THREADS ", torch.get_num_threads())
         self.hypers = {}
         if "hypers_ps" in self._params:
             hypers_ps = self._params["hypers_ps"]
@@ -164,7 +168,6 @@ class GenericMDCalculator:
             )
         if cell_matrix.shape != (3, 3):
             raise ValueError("Improper shape of cell info (expected 3x3 matrix)")
-
         # Update ASE Atoms object
         self.atoms.set_cell(cell_matrix)
         self.atoms.set_positions(positions)
@@ -176,8 +179,13 @@ class GenericMDCalculator:
         torch_system.positions.requires_grad_(True)
         torch_system.cell.requires_grad_(True)
 
+        self._timings["fw_model"] -= time()
+        rex = time()
         radial_spectrum = self._dataset.compute_radial_spectrum(torch_system, 0)
+        rex = time() -rex
+        spex = time()
         spherical_expansion = self._dataset.compute_spherical_expansion(torch_system, 0)
+        spex = time() - spex
 
         energy_torch, _ = self.model(
             composition,
@@ -185,10 +193,18 @@ class GenericMDCalculator:
             spherical_expansion,
             forward_forces=False,
         )
+        self._timings["fw_model"] += time()
 
         # backward propagation for forces and stress
+        self._timings["bw_model"] -= time()        
         energy_torch.backward()
-
+        self._timings["bw_model"] += time()
+        self._neval += 1 
+        print("TIMINGS: fw: %10.5f   bw:   %10.5f" % (self._timings["fw_model"]/self._neval, self._timings["bw_model"]/self._neval))
+        print("DETAILED: rex: %10.5f  spex: %10.5f  cc: %10.5f  rs:  %10.5f  ps:  %10.5f   nn:  %10.5f" %(
+            rex, spex, self.model._timings["fw_comp"]/self.model._neval,
+               self.model._timings["fw_pair"]/self.model._neval, self.model._timings["fw_ps"]/self.model._neval, self.model._timings["fw_nn"]/self.model._neval))
+        
         forces_torch = -torch_system.positions.grad
         cell_grad = torch_system.cell.grad
 
