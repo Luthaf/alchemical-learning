@@ -246,7 +246,9 @@ def main(datafile, parameters, device="cpu"):
             n_pseudo_central_species=parameters.get("n_pseudo_central_species", len(all_species))
                 if parameters.get("n_pseudo_central_species", len(all_species)) <= len(all_species)
                 else len(all_species),
-            seed=parameters.get("seed")
+            seed=parameters.get("seed"),
+            add_bias=parameters.get("combiner_add_bias", False),
+            max_angular=hypers_ps["max_angular"]
         )
     elif COMBINER_TYPE == "CombineSpeciesWithCentralSpecies":
         assert species_center_key_to_samples == False

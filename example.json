@@ -36,7 +36,10 @@
         "center_atom_weight": 1.0
     },
     "optimizer": "LBFGS",
-    "combiner": "CombineRadialSpecies",
-    "do_gradients": false,
-    "stop_epoch_size": 500
+    "combiner": "CombineRadialSpeciesWithCentralSpecies",
+    "do_gradients": true,
+    "stop_epoch_size": 800,
+    "species_center_key_to_samples": false,
+    "n_pseudo_central_species": 5,
+    "combiner_add_bias": false
 }
