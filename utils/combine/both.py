@@ -331,10 +331,7 @@ class CombineRadialSpeciesWithCentralSpecies(torch.nn.Module):
         n_combined_basis,
         n_pseudo_central_species=None,
         seed=None,
-        add_bias=False,
-        max_angular=None,
         *,
-        explicit_bias=None,
         explicit_linear_params=None,
         explicit_combining_matrix=None,
     ):
@@ -343,11 +340,6 @@ class CombineRadialSpeciesWithCentralSpecies(torch.nn.Module):
         self.n_species = len(all_species)
         self.max_radial = max_radial
         self.central_species_index = {s: i for i, s in enumerate(all_species)}
-        
-        assert (add_bias == True and max_angular is not None) or (add_bias == False)
-        self.n_angular = None
-        if max_angular is not None:
-            self.n_angular = max_angular + 1
 
         if n_pseudo_central_species is None:
             self.n_pseudo_central_species = self.n_species
@@ -369,16 +361,6 @@ class CombineRadialSpeciesWithCentralSpecies(torch.nn.Module):
             )
         else:
             self.register_buffer("combining_matrix", explicit_combining_matrix)
-        
-        self.bias = None
-        if add_bias == True:
-            if explicit_bias is None:
-                assert self.n_angular is not None
-                self.bias = torch.nn.ParameterList([
-                torch.nn.Parameter(torch.rand((self.n_pseudo_central_species, self.n_angular**2))),
-                torch.nn.Parameter(torch.rand((self.n_pseudo_central_species, n_combined_basis)))])
-            else:
-                self.register_buffer("bias", explicit_bias)
 
     def detach(self):
         return CombineRadialSpeciesWithCentralSpecies(
@@ -386,11 +368,6 @@ class CombineRadialSpeciesWithCentralSpecies(torch.nn.Module):
             self.max_radial,
             self.combining_matrix.shape[2],
             self.n_pseudo_central_species,
-            add_bias=(self.n_angular is not None),
-            max_angular=None
-                if self.n_angular is None
-                else self.n_angular - 1,
-            explicit_bias=self.bias.clone().detach(),
             explicit_linear_params=None
                 if self.linear_params is None
                 else self.linear_params.clone().detach(),
@@ -411,29 +388,19 @@ class CombineRadialSpeciesWithCentralSpecies(torch.nn.Module):
             ),
         )
 
-        cs_bias = None
-        if self.bias is not None:
-            cs_bias = torch.einsum('pa,pb->pab', self.bias[0], self.bias[1])
         if self.linear_params is None:
             cs_combining_matrix = self.combining_matrix
         else:
-            cs_combining_matrix = torch.einsum('sp,pnq->snq', self.linear_params, self.combining_matrix)
+            cs_combining_matrix = self.combining_matrix.swapaxes(0, 1)
+            cs_combining_matrix = (self.linear_params @ cs_combining_matrix).swapaxes(0, 1)
             # or
-            # cs_combining_matrix = self.combining_matrix.swapaxes(0, 1)
-            # cs_combining_matrix = (self.linear_params @ cs_combining_matrix).swapaxes(0, 1)
-            if self.bias is not None:
-                cs_bias = torch.einsum('sp,pkq->skq', self.linear_params, cs_bias)
-        if self.bias is not None:
-            cs_bias = [cs_bias[:, l**2 : (l+1)**2] for l in range(self.n_angular)]
+            # cs_combining_matrix = torch.einsum('sp,pnq->snq', self.linear_params, self.combining_matrix)
 
         blocks = []
         for key, block in spherical_expansion:
-            cs_i = self.central_species_index[key["species_center"]]
-            l = key["spherical_harmonics_l"]
+            cs_i = self.central_species_index[key[1]]
             new_block = TensorBlock(
-                values=block.values @ cs_combining_matrix[cs_i]
-                    if cs_bias is None
-                    else block.values @ cs_combining_matrix[cs_i] + cs_bias[l][cs_i],
+                values=block.values @ cs_combining_matrix[cs_i],
                 samples=block.samples,
                 components=block.components,
                 properties=properties,
@@ -443,9 +410,7 @@ class CombineRadialSpeciesWithCentralSpecies(torch.nn.Module):
                 gradient = block.gradient("positions")
                 new_block.add_gradient(
                     "positions",
-                    gradient.data @ cs_combining_matrix[cs_i]
-                    if cs_bias is None
-                    else gradient.data @ cs_combining_matrix[cs_i] + cs_bias[l][cs_i],
+                    gradient.data @ cs_combining_matrix[cs_i],
                     gradient.samples,
                     gradient.components,
                 )
