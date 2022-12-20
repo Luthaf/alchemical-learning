@@ -7,4 +7,4 @@ git+https://github.com/Luthaf/rascaline-torch.git@alchemy-paper
 numpy
 ase
 scikit-learn
-git+https://github.com/lab-cosmo/i-pi.git@908b2aa453c3126718e13e621ce29f09f8df1bb4
+git+https://github.com/lab-cosmo/i-pi.git@alchemy-paper
