@@ -207,6 +207,13 @@ class CombineSpeciesPerCenter(torch.nn.Module):
         return TensorMap(spherical_expansion.keys, blocks)
 
 
+class UnitCombineSpecies(CombineSpecies):
+    """For now, the UnitCombineSpecies simply returns unweighted Spherical Expansions
+    """
+    def forward(self, spherical_expansion: TensorMap) -> TensorMap:
+        return spherical_expansion
+
+
 def _species_coupling_matrix(species, n_contracted):
     K = np.zeros((len(species), len(species)))
 

@@ -9,7 +9,7 @@ import ase.io
 import numpy as np
 import torch
 
-from utils.combine import CombineSpecies
+from utils.combine import UnitCombineSpecies, CombineSpecies
 from utils.dataset import AtomisticDataset, create_dataloader
 from utils.model import AlchemicalModel
 
@@ -160,7 +160,7 @@ def main(datafile, parameters, device="cpu"):
         device=device,
     )
 
-    combiner = CombineSpecies(
+    combiner = UnitCombineSpecies(
         species=all_species,
         n_pseudo_species=parameters["n_pseudo_species"],
         # TODO: remove this from code

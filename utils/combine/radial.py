@@ -93,3 +93,7 @@ class CombineRadial(torch.nn.Module):
             blocks.append(new_block)
 
         return TensorMap(spherical_expansion.keys, blocks)
+
+class UnitCombineRadial(CombineRadial):
+    def forward(self, spherical_expansion: TensorMap) -> TensorMap:
+        return spherical_expansion
