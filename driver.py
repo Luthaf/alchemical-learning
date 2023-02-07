@@ -6,7 +6,7 @@ import ase.io
 import torch
 from rascaline_torch import as_torch_system
 
-from utils.combine import CombineSpecies
+from utils.combine import UnitCombineSpecies, CombineSpecies
 from utils.dataset import AtomisticDataset, create_dataloader
 from utils.model import AlchemicalModel
 
@@ -87,7 +87,7 @@ class GenericMDCalculator:
             device=device,
         )
 
-        combiner = CombineSpecies(
+        combiner = UnitCombineSpecies(
             species=all_species,
             n_pseudo_species=self._params["n_pseudo_species"],
         )
