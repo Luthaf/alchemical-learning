@@ -217,3 +217,113 @@ class AlchemicalModel(torch.nn.Module):
 
             if self.nn_model is not None:
                 self.nn_model.initialize_model_weights(power_spectrum, energies, forces)
+
+
+class SoapBpnn(torch.nn.Module):
+    def __init__(
+        self,
+        # combiner for the spherical expansion (mainly tested with alchemical
+        # combination)
+        combiner,
+        # Regularizer for the 1-body/composition model. Set to None to remove
+        # the 1-body model from the fit
+        composition_regularizer,
+        # Number of layers for the neural network applied on top of power spectrum
+        # Set to None to use a pure linear model
+        nn_layer_size=None,
+        # list of atomic types to explode the power spectrum. None to use same
+        # model for all centers (default)
+        ps_center_types=None,
+        optimizable_weights=True,
+        random_initial_weights=True,
+    ):
+        super().__init__()
+
+        if composition_regularizer is None:
+            self.composition_model = None
+        else:
+            self.composition_model = LinearModel(
+                regularizer=composition_regularizer,
+                optimizable_weights=optimizable_weights,
+                random_initial_weights=random_initial_weights,
+            )
+
+        self.power_spectrum = CombinedPowerSpectrum(combiner)
+        self.nn_model = NNModel(nn_layer_size)
+
+        self._neval = 0        
+        self._timings = dict(fw_comp = 0.0, fw_pair = 0.0, fw_ps = 0.0, fw_nn = 0.0)
+
+    @profile
+    def forward(
+        self,
+        composition,
+        radial_spectrum,
+        spherical_expansion,
+        forward_forces=False,
+    ):
+        if not forward_forces:
+            # remove gradients if we don't need them
+            spherical_expansion = remove_gradient(spherical_expansion)
+            if radial_spectrum is not None:
+                radial_spectrum = remove_gradient(radial_spectrum)
+
+        energies = torch.zeros(
+            (len(composition.block().samples), 1),
+            device=composition.block().values.device,
+        )
+        forces = None
+
+        #Model that learns and removes the energy offset, as a function of the structure composition
+        if self.composition_model is not None:
+            self._timings["fw_comp"] -= time()
+            energies_cmp, _ = self.composition_model(composition)
+            energies += energies_cmp
+            self._timings["fw_comp"] += time()            
+            self._timings["fw_pair"] += time()  
+
+        #TODO: Remove this and concatenate RS with SOAP
+                    
+                              
+        
+        #TODO: remove the linear part and only apply NN
+        self._timings["fw_ps"] -= time()        
+        power_spectrum = self.power_spectrum(spherical_expansion)                         
+        
+        nn_energies, nn_forces = self.nn_model(
+            power_spectrum, with_forces=forward_forces
+        )
+        
+        energies += nn_energies
+        forces = nn_forces
+        
+        self._timings["fw_nn"] += time()                    
+
+        self._neval += 1                
+        return energies, forces
+
+    def initialize_model_weights(
+        self,
+        composition,
+        radial_spectrum,
+        spherical_expansion,
+        energies,
+        forces=None,
+        seed=None,
+    ):
+        if forces is None:
+            # remove gradients if we don't need them
+            spherical_expansion = remove_gradient(spherical_expansion)
+            if radial_spectrum is not None:
+                radial_spectrum = remove_gradient(radial_spectrum)
+
+        if self.composition_model is not None:
+            self.composition_model.initialize_model_weights(
+                composition, energies, forces, seed
+            )
+            
+            energies -= self.composition_model(composition)[0]
+
+        if self.nn_model is not None:
+            power_spectrum = self.power_spectrum(spherical_expansion)
+            self.nn_model.initialize_model_weights(power_spectrum, energies, forces)
