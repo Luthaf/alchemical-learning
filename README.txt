@@ -21,3 +21,5 @@ Writing down some of the things that are necessary to make this code run.
 6th within the ./i-pi/drivers/py/pes/ directory make a softlink to the alchemical-learning directory
 
 7th also, add the i-pi driver from ./i-pi/bin/ to your PATH
+
+8th using these commits/versions the example.json parameterfile is broken and the "1"/"2" in the "radial_per_angular" have to be replaced with actual ints
