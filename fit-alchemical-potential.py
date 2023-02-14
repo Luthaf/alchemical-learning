@@ -11,9 +11,7 @@ import ase.io
 import numpy as np
 import torch
 
-from utils.combine import CombineSpecies, CombineRadialSpecies, CombineRadialSpeciesWithAngular, \
-    CombineRadialSpeciesWithAngularAdaptBasis, CombineRadialSpeciesWithAngularAdaptBasisRadial, \
-    CombineRadialSpeciesWithCentralSpecies, CombineSpeciesWithCentralSpecies
+from utils.combine import CombineSpecies, CombineRadialSpecies, CombineRadialSpeciesWithCentralSpecies
 from utils.dataset import AtomisticDataset, create_dataloader
 from utils.model import AlchemicalModel
 
@@ -87,6 +85,7 @@ def main(datafile, parameters, device="cpu"):
     train_frames = frames[:n_train]
     train_forces_frames = frames[n_train : n_train + n_train_forces]
     test_frames = frames[-n_test:]
+    n_atoms_test = sum([len(f) for f in test_frames])
 
     train_energies, _ = extract_energy_forces(train_frames)
     train_f_energies, train_f_forces = extract_energy_forces(train_forces_frames)
@@ -209,51 +208,12 @@ def main(datafile, parameters, device="cpu"):
             n_combined_basis=parameters.get("n_combined_basis", 16),
             seed=parameters.get("seed")
         )
-    elif COMBINER_TYPE == "CombineRadialSpeciesWithAngular":
-        combiner = CombineRadialSpeciesWithAngular(
-            n_species=len(all_species),
-            max_radial=hypers_ps["max_radial"],
-            max_angular=hypers_ps["max_angular"],
-            n_combined_basis=parameters.get("n_combined_basis", 16),
-            seed=parameters.get("seed")
-        )
-    elif COMBINER_TYPE == "CombineRadialSpeciesWithAngularAdaptBasis":
-        combiner = CombineRadialSpeciesWithAngularAdaptBasis(
-            n_species=len(all_species),
-            max_radial=hypers_ps["max_radial"],
-            max_angular=hypers_ps["max_angular"],
-            n_combined_basis=parameters.get("n_combined_basis", 16),
-            combined_basis_per_angular=combined_basis_per_angular,
-            seed=parameters.get("seed")
-        )
-    elif COMBINER_TYPE == "CombineRadialSpeciesWithAngularAdaptBasisRadial":
-        combiner = CombineRadialSpeciesWithAngularAdaptBasisRadial(
-            n_species=len(all_species),
-            max_radial=hypers_ps["max_radial"],
-            max_angular=hypers_ps["max_angular"],
-            radial_per_angular=hypers_ps["radial_per_angular"],
-            n_combined_basis=parameters.get("n_combined_basis", 16),
-            combined_basis_per_angular=combined_basis_per_angular,
-            seed=parameters.get("seed")
-        )
     elif COMBINER_TYPE == "CombineRadialSpeciesWithCentralSpecies":
         assert species_center_key_to_samples == False
         combiner = CombineRadialSpeciesWithCentralSpecies(
-            # n_species=len(all_species),
             all_species=all_species,
             max_radial=hypers_ps["max_radial"],
             n_combined_basis=parameters.get("n_combined_basis", 16),
-            n_pseudo_central_species=parameters.get("n_pseudo_central_species", len(all_species))
-                if parameters.get("n_pseudo_central_species", len(all_species)) <= len(all_species)
-                else len(all_species),
-            seed=parameters.get("seed")
-        )
-    elif COMBINER_TYPE == "CombineSpeciesWithCentralSpecies":
-        assert species_center_key_to_samples == False
-        combiner = CombineSpeciesWithCentralSpecies(
-            all_species,
-            hypers_ps["max_radial"],
-            parameters["n_pseudo_species"],
             n_pseudo_central_species=parameters.get("n_pseudo_central_species", len(all_species))
                 if parameters.get("n_pseudo_central_species", len(all_species)) <= len(all_species)
                 else len(all_species),
@@ -351,13 +311,10 @@ def main(datafile, parameters, device="cpu"):
         )
 
     output = open(f"{prefix}/log.txt", "w")
-    if parameters.get("scheduler", False):
-        output.write("# epoch  train_loss  test_mae test_mae_f  curr_lr\n")
-    else:
-        output.write("# epoch  train_loss  test_mae test_mae_f  epoch_plus_test_time  total_time\n")
+    output.write("# epoch  train_loss  test_mae test_mae_f  epoch_plus_test_time  total_time\n")
     torch.save(model.state_dict(), f"{prefix}/initial.torch")
 
-    high_mem = parameters.get("high_mem", True) # NOTE: Configuration "high_mem = False, n_train_forces != 0" needs to be tested
+    high_mem = parameters.get("high_mem", True)
     if high_mem:
         composition, radial_spectrum, spherical_expansions, energies, forces = next(
             iter(train_dataloader_no_batch)
@@ -382,11 +339,6 @@ def main(datafile, parameters, device="cpu"):
     with open(f"{prefix}/epochs.dat", "a") as fd:
                 fd.write("epoch test_mae test_mae_forces loss train_mae\n")
 
-    scheduler = None
-    if parameters.get("scheduler", False):
-        lambda1 = lambda x: (1.0 + np.cos(10*(1+x)/np.pi/(n_epochs - n_epochs_already_done)))/2
-        scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda1)
-
     total_time = 0.0
     for epoch in range(n_epochs_already_done, n_epochs):
         print("Beginning epoch", epoch)
@@ -394,8 +346,6 @@ def main(datafile, parameters, device="cpu"):
 
         @profile
         def single_step():
-            # global composition, radial_spectrum, spherical_expansions, energies
-            # global f_composition, f_radial_spectrum, f_spherical_expansions, f_energies, f_forces
             nonlocal composition, radial_spectrum, spherical_expansions, energies
             nonlocal f_composition, f_radial_spectrum, f_spherical_expansions, f_energies, f_forces, do_gradients
             optimizer.zero_grad()
@@ -554,29 +504,22 @@ def main(datafile, parameters, device="cpu"):
             if do_gradients:
                 reference_forces = torch.vstack(reference_forces)
                 predicted_forces = torch.vstack(predicted_forces)
-                # TODO: do this properly
                 test_mae_forces = (
-                    loss_mae(predicted_forces, reference_forces) / n_test / (3 * 42)
+                    loss_mae(predicted_forces, reference_forces) / n_atoms_test / 3
                 )
             else:
                 class C(): # a class which returns a dummy value by calling ".item()"
                     item = lambda x: -111.111
                 test_mae_forces = C()
 
-            if scheduler is not None:
-                curr_lr = optimizer.param_groups[0]["lr"]
-                output.write(
-                    f"{epoch} {loss.item()} {test_mae.item()} {test_mae_forces.item()} {curr_lr}\n"
-                )
-            else:
-                epoch_plus_test_time = time.time() - epoch_start
-                total_time+= epoch_plus_test_time
-                str_total_time = strftime("%d-%H:%M:%S", gmtime(int(total_time)))
-                # reduce the number of days by one
-                str_total_time = f"{(int(str_total_time[:2]) - 1):02d}" + str_total_time[2:]
-                output.write(
-                    f"{epoch} {loss.item()} {test_mae.item()} {test_mae_forces.item()} {epoch_plus_test_time:.4} {str_total_time}\n"
-                )
+            epoch_plus_test_time = time.time() - epoch_start
+            total_time+= epoch_plus_test_time
+            str_total_time = strftime("%d-%H:%M:%S", gmtime(int(total_time)))
+            # reduce the number of days by one
+            str_total_time = f"{(int(str_total_time[:2]) - 1):02d}" + str_total_time[2:]
+            output.write(
+                f"{epoch} {loss.item()} {test_mae.item()} {test_mae_forces.item()} {epoch_plus_test_time:.4} {str_total_time}\n"
+            )
             output.flush()
 
             print(
@@ -613,10 +556,6 @@ def main(datafile, parameters, device="cpu"):
                 torch.save(model.state_dict(), f"{prefix}/best.torch")
                 best_mae_epoch = epoch
             del test_mae, test_mae_forces
-
-        if scheduler is not None:
-            scheduler.step()
-
         del loss
         torch.save(model.state_dict(), f"{prefix}/restart.torch")
         
