@@ -1,8 +1,9 @@
 import torch
 
 from utils.linear import LinearModel
-from utils.nonlinear import NNModel
+from utils.nonlinear import NNModel, NNModelSPeciesWise
 from utils.operations import SumStructures, remove_gradient
+from utils.multi_species_mlp import MultiSpeciesMLP_skip
 from utils.soap import PowerSpectrum
 from time import time
 
@@ -249,7 +250,7 @@ class SoapBpnn(torch.nn.Module):
             )
 
         self.power_spectrum = CombinedPowerSpectrum(combiner)
-        self.nn_model = NNModel(nn_layer_size)
+        self.nn_model = NNModelSPeciesWise(nn_layer_size)
 
         self._neval = 0        
         self._timings = dict(fw_comp = 0.0, fw_pair = 0.0, fw_ps = 0.0, fw_nn = 0.0)
@@ -288,7 +289,10 @@ class SoapBpnn(torch.nn.Module):
         
         #TODO: remove the linear part and only apply NN
         self._timings["fw_ps"] -= time()        
-        power_spectrum = self.power_spectrum(spherical_expansion)                         
+        power_spectrum = self.power_spectrum(spherical_expansion)
+
+        
+                                 
         
         nn_energies, nn_forces = self.nn_model(
             power_spectrum, with_forces=forward_forces
@@ -321,9 +325,10 @@ class SoapBpnn(torch.nn.Module):
             self.composition_model.initialize_model_weights(
                 composition, energies, forces, seed
             )
-            
+
             energies -= self.composition_model(composition)[0]
 
         if self.nn_model is not None:
             power_spectrum = self.power_spectrum(spherical_expansion)
             self.nn_model.initialize_model_weights(power_spectrum, energies, forces)
+
