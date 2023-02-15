@@ -2,6 +2,13 @@ from typing import List
 import numpy as np
 import torch
 from copy import copy
+from dataclasses import dataclass
+
+@dataclass
+class EquistoreDummy:
+    z: torch.Tensor
+    val: torch.Tensor
+    idx: torch.Tensor
 
 def EmbeddingFactory(elements:List[int],one_hot:bool) -> torch.nn.Embedding:
     """Returns an Embedding of dim max_Z,n_unique_elements
