@@ -125,12 +125,15 @@ class NNModelSPeciesWise(torch.nn.Module):
         self.n_out = 1
 
     # build a combined 
-    def initialize_model_weights(self, descriptor, energies, forces=None, seed=None):
+    def initialize_model_weights(self, descriptors, energies, forces=None, seed=None):
         if seed is not None:
             torch.manual_seed(seed)
+        
+        for descriptor in descriptors:
+            print(descriptor.block().values.shape[-1])
 
-        X = descriptor.block().values
-        z = torch.tensor(descriptor.block().samples["species_center"])
+        n_feats = sum([ descriptor.block().values.shape[-1] for descriptor in descriptors])
+        z = torch.tensor(descriptors[0].block().samples["species_center"])
 
         species_unique = torch.unique(z).tolist()
 
@@ -142,18 +145,18 @@ class NNModelSPeciesWise(torch.nn.Module):
                 m.bias.data.fill_(0)
 
         # 
-        n_feat_descriptor = X.shape[-1]
+        n_feat_descriptor = n_feats
 
 
         #MultiSpeciesMLP_skip: feat --> species wise NN, skipping evals --> atomic contributions out
         self.nn = MultiSpeciesMLP_skip(species_unique,n_feat_descriptor,self.n_out,self.layer_size)
 
-    def forward(self, descriptor, with_forces=False):
+    def forward(self, descriptors, with_forces=False):
         if self.nn is None:
             raise Exception("call initialize_weights first")
 
-        ps_block = descriptor.block()
-        ps_tensor = ps_block.values #is this a torch tensor? check
+        ps_block = descriptors[0].block()
+        ps_tensor = torch.cat([ descriptor.block().values for descriptor in descriptors],dim=1)
 
         # obtaining central species of batch
         ps_z = torch.tensor(ps_block.samples["species_center"])
@@ -186,9 +189,10 @@ class NNModelSPeciesWise(torch.nn.Module):
                 retain_graph=True,
             )
 
-
-            ps_gradient = descriptor.block().gradient("positions")
-            ps_tensor_grad = ps_gradient.data.reshape(-1, 3, ps_tensor.shape[-1])
+            ps_gradient = descriptors[0].block().gradient("positions")
+            ps_tensor_grad = torch.cat([ 
+            descriptor.block().gradient("positions").data.reshape(-1, 3, descriptor.block().values.shape[-1])
+            for descriptor in descriptors ],dim=2)
 
             gradient_samples_Aj = np.asarray(
                 ps_gradient.samples[["structure", "atom"]], dtype=tuple

@@ -132,6 +132,8 @@ class AtomisticDataset(torch.utils.data.Dataset):
             self.radial_spectrum_calculator = Calculator(
                 SphericalExpansion(**hypers_radial_spectrum)
             )
+            
+            #TODO: Remove this to get atomic environment wise structures
             self.sum_structures = SumStructures()
 
             for frame_i, frame in enumerate(frames):
@@ -145,6 +147,9 @@ class AtomisticDataset(torch.utils.data.Dataset):
 
         self.spherical_expansions = []
         hypers_spherical_expansion = copy.deepcopy(hypers.get("spherical_expansion"))
+        
+        
+
         if "radial_per_angular" in hypers_spherical_expansion:
             radial_per_angular = hypers_spherical_expansion.pop("radial_per_angular")
 
@@ -187,6 +192,7 @@ class AtomisticDataset(torch.utils.data.Dataset):
             [frame], np.array([frame_i], dtype=np.int32).reshape(-1, 1)
         )
 
+    #TODO: Do it atomic environment wise
     def compute_radial_spectrum(self, system, system_i):
         spherical_expansion = self.radial_spectrum_calculator(
             system,
@@ -199,8 +205,10 @@ class AtomisticDataset(torch.utils.data.Dataset):
         spherical_expansion.components_to_properties("spherical_harmonics_m")
         spherical_expansion.keys_to_properties("spherical_harmonics_l")
         
+        #TODO: remove the sum_structures here aswell
+        #or: make a sum_structures_option
 
-        return self.sum_structures(_move_to_torch(spherical_expansion, system_i))
+        return _move_to_torch(spherical_expansion, system_i)
 
     def compute_spherical_expansion(self, system, system_i):
         if isinstance(self.spherical_expansion_calculator, dict):

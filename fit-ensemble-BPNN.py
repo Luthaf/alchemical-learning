@@ -95,6 +95,7 @@ def main(datafile, parameters, device="cpu"):
         "frames with forces"
     )
 
+    
     print("Computing representations")
     hypers_ps = parameters["hypers_ps"]
     if "radial_per_angular" in hypers_ps:
@@ -102,6 +103,10 @@ def main(datafile, parameters, device="cpu"):
             int(k): v for k, v in hypers_ps["radial_per_angular"].items()
         }
     hypers_rs = parameters.get("hypers_rs")
+
+    # check that hypers_ps and hypers_rs have same cutoff radius
+
+    assert hypers_rs["cutoff"] == hypers_ps["cutoff"]
 
     train_dataset = AtomisticDataset(
         train_frames,
