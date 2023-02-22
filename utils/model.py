@@ -237,6 +237,7 @@ class SoapBpnn(torch.nn.Module):
         ps_center_types=None,
         optimizable_weights=True,
         random_initial_weights=True,
+        nn_model_architecture=None,
     ):
         super().__init__()
 

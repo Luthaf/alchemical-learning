@@ -23,17 +23,18 @@ except NameError:
 
 torch.set_default_dtype(torch.float64)
 
-
+#this is not the MAE
 def loss_mae(predicted, actual):
     return torch.sum(torch.abs(predicted.flatten() - actual.flatten()))
 
 
+
 def loss_mse(predicted, actual):
-    return torch.sum((predicted.flatten() - actual.flatten()) ** 2)
+    return torch.mean((predicted.flatten() - actual.flatten()) ** 2)
 
 
 def loss_rmse(predicted, actual):
-    return np.sqrt(loss_mse(predicted, actual))
+    return torch.sqrt(loss_mse(predicted, actual))
 
 
 def extract_energy_forces(frames):
@@ -190,6 +191,9 @@ def main(datafile, parameters, device="cpu"):
 
     # --------- INITIALIZE MODEL --------- #
     print("Initializing model")
+    print("Setting seed to: {}".format(parameters.get("seed")))
+    torch.manual_seed(parameters.get("seed"))
+
     with torch.no_grad():
         for (
             composition,
@@ -359,13 +363,15 @@ def main(datafile, parameters, device="cpu"):
 
             reference = torch.vstack(reference)
             predicted = torch.vstack(predicted)
+
             test_mae = loss_mae(predicted, reference) / n_test
+            test_rmse = loss_rmse(predicted, reference)
 
             reference_forces = torch.vstack(reference_forces)
             predicted_forces = torch.vstack(predicted_forces)
             # TODO: do this properly
             test_mae_forces = (
-                loss_mae(predicted_forces, reference_forces) / n_test / (3 * 42)
+                loss_mae(predicted_forces, reference_forces) / n_test / (3 * 64 * 3)
             )
 
             output.write(
@@ -375,13 +381,14 @@ def main(datafile, parameters, device="cpu"):
 
             print(
                 f"epoch {epoch} took {epoch_time:.4}s, "
-                f"optimizer loss={loss.item():.4}, test mae={test_mae.item():.4} "
+                f"optimizer loss={loss.item():.4}, test mae={test_mae.item():.4}, test rmse={test_rmse.item():.4}, "
                 f"test mae force={test_mae_forces.item():.4}"
             )
 
             with open(f"{prefix}/epochs.dat", "a") as fd:
                 fd.write(f"{epoch} ")
                 fd.write(f"{test_mae.item()} ")
+                fd.write(f"{test_rmse.item()} ")
                 fd.write(f"{test_mae_forces.item()} ")
                 fd.write(f"{loss.item()} ")
                 fd.write(f"{train_mae.item()}\n")

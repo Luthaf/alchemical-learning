@@ -41,27 +41,37 @@ class SimpleMLP(torch.nn.Module):
     """
 
     # TODO: add n_hidden_layers, activation function option
-    def __init__(self, dim_input: int, dim_output: int, layer_size: int) -> None:
+    def __init__(self, dim_input: int, dim_output: int, layer_size: int, nn_architecture: torch.nn.Sequential = None) -> None:
         super().__init__()
+
+
+        """nn_architecture overwrites the default 
+        """
 
         self.layer_size = layer_size
         self.dim_input = dim_input
         self.dim_output = dim_output
 
-        self.nn = torch.nn.Sequential(
-            torch.nn.Linear(self.dim_input, self.layer_size),
-            torch.nn.Tanh(),
-            torch.nn.Linear(self.layer_size, self.layer_size),
-            torch.nn.Tanh(),
-            torch.nn.Linear(self.layer_size, self.dim_output),
-        )
+        if nn_architecture is None:
+            self.nn = torch.nn.Sequential(
+                torch.nn.Linear(self.dim_input, self.layer_size),
+                torch.nn.Tanh(),
+                torch.nn.LayerNorm(self.layer_size),
+                torch.nn.Linear(self.layer_size, self.layer_size),
+                torch.nn.Tanh(),
+                torch.nn.LayerNorm(self.layer_size),
+                torch.nn.Linear(self.layer_size, self.dim_output),
+            )
+        else:
+            self.nn = nn_architecture
+
     def forward(self,x: torch.tensor) -> torch.tensor:
         return self.nn(x)
 
 class MultiMLP(torch.nn.Module):    
     """ A Multi MLP that contains N_species * SimpleMLPs
     """
-    def __init__(self, dim_input: int, dim_output: int, layer_size: int, species: int) -> None:
+    def __init__(self, dim_input: int, dim_output: int, layer_size: int, species: int, nn_architecture: torch.nn.Sequential=None) -> None:
         super().__init__()
 
         self.dim_output = dim_output
@@ -71,7 +81,10 @@ class MultiMLP(torch.nn.Module):
         self.n_species = len(self.species)
 
         # initialize as many SimpleMLPs as atomic species
-        self.species_nn = torch.nn.ModuleList([ SimpleMLP(dim_input,dim_output,layer_size) for _ in self.species])
+        if nn_architecture is None:
+            self.species_nn = torch.nn.ModuleList([ SimpleMLP(dim_input,dim_output,layer_size) for _ in self.species])
+        else:
+            self.species_nn = torch.nn.ModuleList([ SimpleMLP(dim_input,dim_output,layer_size,nn_architecture) for _ in self.species])
     
     def forward(self, x: torch.tensor) -> torch.tensor:
         return torch.cat([nn(x) for nn in self.species_nn],dim=1)
@@ -148,7 +161,7 @@ class MultiSpeciesMLP_skip(torch.nn.Module):
     This implementation should scale O(Natoms) as it skips the neural network evaluations that would be otherwise only multiplied with zeros
     """
 
-    def __init__(self, species, n_in, n_out, n_hidden) -> None:
+    def __init__(self, species, n_in, n_out, n_hidden, nn_architecture=None) -> None:
         
         super().__init__()
 
@@ -167,7 +180,7 @@ class MultiSpeciesMLP_skip(torch.nn.Module):
         # therefore -> MultiMLP_skip has no trainable kwargs and one_hot in EmbeddingFactory is always true
         # TODO: Implement this properly in the MultiSpeciesMLP class
 
-        self.nn = MultiMLP_skip(n_in,n_out,n_hidden,species)
+        self.nn = MultiMLP_skip(n_in,n_out,n_hidden,species,nn_architecture)
         self.embedding = EmbeddingFactory(species, True)
         self.embedding.requires_grad_ = False
 
