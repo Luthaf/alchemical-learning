@@ -289,12 +289,11 @@ class SoapBpnn(torch.nn.Module):
                               
         
         #TODO: remove the linear part and only apply NN
-        self._timings["fw_ps"] -= time()        
-        power_spectrum = self.power_spectrum(spherical_expansion)
+        self._timings["fw_ps"] -= time()
 
-        
-                                 
-        
+        #TODO: remove this because we get the SOAPs sthrough rascaline 
+        power_spectrum = spherical_expansion #self.power_spectrum(spherical_expansion)
+
         nn_energies, nn_forces = self.nn_model(
             [power_spectrum, radial_spectrum], with_forces=forward_forces
         )
@@ -315,6 +314,7 @@ class SoapBpnn(torch.nn.Module):
         energies,
         forces=None,
         seed=None,
+        nn_architecture=None
     ):
         if forces is None:
             # remove gradients if we don't need them
@@ -330,6 +330,6 @@ class SoapBpnn(torch.nn.Module):
             energies -= self.composition_model(composition)[0]
 
         if self.nn_model is not None:
-            power_spectrum = self.power_spectrum(spherical_expansion)
-            self.nn_model.initialize_model_weights([power_spectrum, radial_spectrum], energies, forces)
+            power_spectrum = spherical_expansion #self.power_spectrum(spherical_expansion)
+            self.nn_model.initialize_model_weights([power_spectrum, radial_spectrum], energies, forces, nn_architecture)
 

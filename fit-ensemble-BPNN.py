@@ -21,6 +21,8 @@ except NameError:
         return func
 
 
+
+
 torch.set_default_dtype(torch.float64)
 
 #this is not the MAE
@@ -202,6 +204,28 @@ def main(datafile, parameters, device="cpu"):
             energies,
             forces,
         ) in train_dataloader_single_frame:
+
+            class CustomMLP(torch.nn.Module):
+                def __init__(self, dim_input,layer_size,dim_output):
+                    super().__init__()
+
+                    self.dim_input = dim_input
+                    self.layer_size = layer_size
+                    self.dim_output = dim_output
+
+                    self.nn =   torch.nn.Sequential(
+                                torch.nn.Linear(self.dim_input, self.layer_size),
+                                torch.nn.Tanh(),
+                                torch.nn.LayerNorm(self.layer_size),
+                                torch.nn.Linear(self.layer_size, self.layer_size),
+                                torch.nn.Tanh(),
+                                torch.nn.LayerNorm(self.layer_size),
+                                torch.nn.Linear(self.layer_size, self.dim_output),
+                                )
+
+                def forward(self, x: torch.Tensor) -> torch.Tensor:
+                    return self.nn(x)
+
             model.initialize_model_weights(
                 composition,
                 radial_spectrum,
@@ -209,6 +233,7 @@ def main(datafile, parameters, device="cpu"):
                 energies,
                 forces,
                 seed=parameters.get("seed"),
+                nn_architecture=CustomMLP
             )
             break
 
@@ -370,9 +395,15 @@ def main(datafile, parameters, device="cpu"):
             reference_forces = torch.vstack(reference_forces)
             predicted_forces = torch.vstack(predicted_forces)
             # TODO: do this properly
+            
             test_mae_forces = (
                 loss_mae(predicted_forces, reference_forces) / n_test / (3 * 64 * 3)
             )
+            
+            test_rmse_forces = (
+                loss_rmse(predicted_forces.flatten(), reference_forces.flatten())
+            )
+
 
             output.write(
                 f"{epoch} {loss.item()} {test_mae.item()} {test_mae_forces.item()}\n"
@@ -382,7 +413,7 @@ def main(datafile, parameters, device="cpu"):
             print(
                 f"epoch {epoch} took {epoch_time:.4}s, "
                 f"optimizer loss={loss.item():.4}, test mae={test_mae.item():.4}, test rmse={test_rmse.item():.4}, "
-                f"test mae force={test_mae_forces.item():.4}"
+                f"test mae force={test_mae_forces.item():.4}, test rmse force={test_rmse_forces.item():.4},"
             )
 
             with open(f"{prefix}/epochs.dat", "a") as fd:

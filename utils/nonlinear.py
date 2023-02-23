@@ -125,7 +125,7 @@ class NNModelSPeciesWise(torch.nn.Module):
         self.n_out = 1
 
     # build a combined 
-    def initialize_model_weights(self, descriptors, energies, forces=None, seed=None):
+    def initialize_model_weights(self, descriptors, energies, forces=None, seed=None, nn_architecture=None):
         if seed is not None:
             torch.manual_seed(seed)
         
@@ -144,12 +144,14 @@ class NNModelSPeciesWise(torch.nn.Module):
                 m.weight.data.fill_(0)
                 m.bias.data.fill_(0)
 
-        # 
         n_feat_descriptor = n_feats
 
 
         #MultiSpeciesMLP_skip: feat --> species wise NN, skipping evals --> atomic contributions out
-        self.nn = MultiSpeciesMLP_skip(species_unique,n_feat_descriptor,self.n_out,self.layer_size)
+        if nn_architecture is None:
+            self.nn = MultiSpeciesMLP_skip(species_unique,n_feat_descriptor,self.n_out,self.layer_size)
+        else:
+            self.nn = MultiSpeciesMLP_skip(species_unique,n_feat_descriptor,self.n_out,self.layer_size,nn_architecture=nn_architecture)
 
     def forward(self, descriptors, with_forces=False):
         if self.nn is None:

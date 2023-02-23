@@ -71,7 +71,7 @@ class SimpleMLP(torch.nn.Module):
 class MultiMLP(torch.nn.Module):    
     """ A Multi MLP that contains N_species * SimpleMLPs
     """
-    def __init__(self, dim_input: int, dim_output: int, layer_size: int, species: int, nn_architecture: torch.nn.Sequential=None) -> None:
+    def __init__(self, dim_input: int, dim_output: int, layer_size: int, species: int, nn_architecture: torch.nn.Module=None) -> None:
         super().__init__()
 
         self.dim_output = dim_output
@@ -84,7 +84,7 @@ class MultiMLP(torch.nn.Module):
         if nn_architecture is None:
             self.species_nn = torch.nn.ModuleList([ SimpleMLP(dim_input,dim_output,layer_size) for _ in self.species])
         else:
-            self.species_nn = torch.nn.ModuleList([ SimpleMLP(dim_input,dim_output,layer_size,nn_architecture) for _ in self.species])
+            self.species_nn = torch.nn.ModuleList([ SimpleMLP(dim_input,dim_output,layer_size,nn_architecture(self.dim_input,self.layer_size,self.dim_output)) for _ in self.species])
     
     def forward(self, x: torch.tensor) -> torch.tensor:
         return torch.cat([nn(x) for nn in self.species_nn],dim=1)

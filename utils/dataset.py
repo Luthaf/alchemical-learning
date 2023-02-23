@@ -4,7 +4,7 @@ from time import time
 import numpy as np
 import torch
 from equistore import Labels, TensorBlock, TensorMap
-from rascaline import SphericalExpansion
+from rascaline import SphericalExpansion, SoapPowerSpectrum
 from rascaline_torch import Calculator, as_torch_system
 
 from .operations import SumStructures
@@ -108,11 +108,22 @@ class AtomisticDataset(torch.utils.data.Dataset):
         energies,
         forces=None,
         do_gradients=False,
-    ):
+    ):  
+        # necessary for later tensormap densify
         self._all_neighbor_species = Labels(
             names=["species_neighbor"],
             values=np.array(all_species, dtype=np.int32).reshape(-1, 1),
         )
+
+        self._all_neighbor_species_1 = Labels(
+            names=["species_neighbor_1"],
+            values=np.array(all_species, dtype=np.int32).reshape(-1, 1),
+        )
+        self._all_neighbor_species_2 = Labels(
+            names=["species_neighbor_2"],
+            values=np.array(all_species, dtype=np.int32).reshape(-1, 1),
+        )
+
         self._all_center_species = Labels(
             names=["species_center"],
             values=np.array(all_species, dtype=np.int32).reshape(-1, 1),
@@ -121,7 +132,9 @@ class AtomisticDataset(torch.utils.data.Dataset):
         self.do_gradients = do_gradients
         self.composition = []
 
+        #TODO: This can be replaced by a rascaline composition calculator
         self.composition_calculator = CompositionFeatures(all_species)
+
         for frame_i, frame in enumerate(frames):
             self.composition.append(self.compute_composition(frame, frame_i))
 
@@ -164,7 +177,7 @@ class AtomisticDataset(torch.utils.data.Dataset):
                 )
         else:
             self.spherical_expansion_calculator = Calculator(
-                SphericalExpansion(**hypers_spherical_expansion)
+                SoapPowerSpectrum(**hypers_spherical_expansion)
             )
 
         for frame_i, frame in enumerate(frames):
@@ -192,7 +205,6 @@ class AtomisticDataset(torch.utils.data.Dataset):
             [frame], np.array([frame_i], dtype=np.int32).reshape(-1, 1)
         )
 
-    #TODO: Do it atomic environment wise
     def compute_radial_spectrum(self, system, system_i):
         spherical_expansion = self.radial_spectrum_calculator(
             system,
@@ -204,9 +216,6 @@ class AtomisticDataset(torch.utils.data.Dataset):
         spherical_expansion.keys_to_properties(self._all_center_species)
         spherical_expansion.components_to_properties("spherical_harmonics_m")
         spherical_expansion.keys_to_properties("spherical_harmonics_l")
-        
-        #TODO: remove the sum_structures here aswell
-        #or: make a sum_structures_option
 
         return _move_to_torch(spherical_expansion, system_i)
 
@@ -272,7 +281,8 @@ def _move_to_torch_by_l(tensor_maps, structure_i):
                 keep_forward_grad=self.do_gradients,
             )
             spherical_expansion.keys_to_samples("species_center")
-            spherical_expansion.keys_to_properties(self._all_neighbor_species)
+            spherical_expansion.keys_to_properties(self._all_neighbor_species_1)
+            spherical_expansion.keys_to_properties(self._all_neighbor_species_2)
 
             return _move_to_torch(spherical_expansion, system_i)
 #pot, force, stress [[-992.09006198]] (125, 3) (3, 3)
