@@ -194,7 +194,7 @@ def main(datafile, parameters, device="cpu"):
     # --------- INITIALIZE MODEL --------- #
     print("Initializing model")
     print("Setting seed to: {}".format(parameters.get("seed")))
-    torch.manual_seed(parameters.get("seed"))
+    torch.manual_seed(int(parameters.get("seed")))
 
     with torch.no_grad():
         for (
