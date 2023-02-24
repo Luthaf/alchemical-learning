@@ -331,5 +331,5 @@ class SoapBpnn(torch.nn.Module):
 
         if self.nn_model is not None:
             power_spectrum = spherical_expansion #self.power_spectrum(spherical_expansion)
-            self.nn_model.initialize_model_weights([power_spectrum, radial_spectrum], energies, forces, nn_architecture)
+            self.nn_model.initialize_model_weights([power_spectrum, radial_spectrum], energies, forces, seed, nn_architecture)
 
