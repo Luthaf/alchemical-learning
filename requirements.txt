@@ -1,8 +1,10 @@
+# forces CPU torch 
+--extra-index-url https://download.pytorch.org/whl/cpu
+git+https://github.com/Luthaf/rascaline.git@alchemy-paper
+git+https://github.com/lab-cosmo/equistore.git@alchemy-paper
+torch==1.12.1+cpu
+git+https://github.com/Luthaf/rascaline-torch.git@alchemy-paper
 numpy
-torch
-
 ase
-rascaline @ https://github.com/Luthaf/rascaline/archive/6497955a1cdd1d2a2e5f5aa69eb586684389d5f0.zip
-equistore @ https://github.com/lab-cosmo/equistore/archive/aa9cde9ad1329d1d4b9763f47065f55662e3168c.zip
 scikit-learn
-skcosmo
+git+https://github.com/lab-cosmo/i-pi.git@908b2aa453c3126718e13e621ce29f09f8df1bb4

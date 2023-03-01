@@ -56,10 +56,11 @@ def normalize(descriptor):
 
     return TensorMap(descriptor.keys, blocks)
 
+
 def StructureMap(samples_structure, device="cpu"):
     unique_structures, unique_structures_idx = np.unique(
-            samples_structure, return_index=True
-        )
+        samples_structure, return_index=True
+    )
     new_samples = samples_structure[np.sort(unique_structures_idx)]
     # we need a list keeping track of where each atomic contribution goes
     # (e.g. if structure ids are [3,3,3,1,1,1,6,6,6] that will be stored as
@@ -72,7 +73,7 @@ def StructureMap(samples_structure, device="cpu"):
         device=device,
     )
     return structure_map, new_samples, replace_rule
-    
+
 
 class SumStructuresAutograd(torch.autograd.Function):
     @staticmethod
@@ -88,22 +89,24 @@ class SumStructuresAutograd(torch.autograd.Function):
         # get the unique entries in samples["structure"] without
         # sorting the result (that would break pytorch dataloader shuffling)
         samples_structure = samples["structure"]
-        #unique_structures, unique_structures_idx = np.unique(
+        # unique_structures, unique_structures_idx = np.unique(
         #    samples_structure, return_index=True
-        #)
-        #new_samples = samples_structure[np.sort(unique_structures_idx)]
+        # )
+        # new_samples = samples_structure[np.sort(unique_structures_idx)]
         # we need a list keeping track of where each atomic contribution goes
         # (e.g. if structure ids are [3,3,3,1,1,1,6,6,6] that will be stored as
         # the unique structures [3, 1, 6], structure_map will be
         # [0,0,0,1,1,1,2,2,2]
-        #replace_rule = dict(zip(unique_structures, range(len(unique_structures))))
-        #structure_map = torch.tensor(
+        # replace_rule = dict(zip(unique_structures, range(len(unique_structures))))
+        # structure_map = torch.tensor(
         #    [replace_rule[i] for i in samples_structure],
         #    dtype=torch.long,
         #    device=values.device,
-        #)
-        
-        structure_map, new_samples, replace_rule = StructureMap(samples_structure, values.device)
+        # )
+
+        structure_map, new_samples, replace_rule = StructureMap(
+            samples_structure, values.device
+        )
 
         new_values = torch.zeros(
             (len(new_samples), *values.shape[1:]),
@@ -189,8 +192,9 @@ class SumStructuresAutograd(torch.autograd.Function):
         if gradient_data is not None and gradient_data.requires_grad:
             grad_gradient_data = grad_new_gradient_data[ctx.gradient_map]
 
-        return grad_values, None, grad_gradient_data, None    
-    
+        return grad_values, None, grad_gradient_data, None
+
+
 class SumStructuresCXAutograd(torch.autograd.Function):
     @staticmethod
     @profile
@@ -423,6 +427,7 @@ class SumStructures(torch.nn.Module):
             blocks.append(new_block)
 
         return TensorMap(keys=descriptor.keys, blocks=blocks)
+
 
 def remove_gradient(tensor):
     blocks = []

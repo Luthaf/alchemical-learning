@@ -5,6 +5,7 @@ import numpy as np
 import torch
 from equistore import Labels, TensorBlock, TensorMap
 from rascaline import SphericalExpansion
+from rascaline_torch import Calculator, as_torch_system
 
 from .operations import SumStructures
 from .soap import CompositionFeatures
@@ -19,7 +20,7 @@ def _block_to_torch(block, structure_i):
     samples = Labels(block.samples.names, samples)
 
     new_block = TensorBlock(
-        values=torch.tensor(block.values).to(dtype=torch.get_default_dtype()),
+        values=block.values,
         samples=samples,
         components=block.components,
         properties=block.properties,
@@ -39,7 +40,7 @@ def _block_to_torch(block, structure_i):
 
         new_block.add_gradient(
             parameter=parameter,
-            data=torch.tensor(gradient.data).to(dtype=torch.get_default_dtype()),
+            data=gradient.data,
             samples=gradient_samples,
             components=gradient.components,
         )
@@ -47,11 +48,35 @@ def _block_to_torch(block, structure_i):
     return new_block
 
 
-def _move_to_torch(tensor_map, structure_i):
+def _move_to_torch(tensor_map, structure_i, detach=False):
     blocks = []
     for _, block in tensor_map:
         blocks.append(_block_to_torch(block, structure_i))
 
+    return TensorMap(tensor_map.keys, blocks)
+
+
+def _detach_all_blocks(tensor_map):
+    blocks = []
+    for _, block in tensor_map:
+        new_block = TensorBlock(
+            values=block.values.detach(),
+            samples=block.samples,
+            components=block.components,
+            properties=block.properties,
+        )
+
+        for parameter in block.gradients_list():
+            gradient = block.gradient(parameter)
+
+            new_block.add_gradient(
+                parameter=parameter,
+                data=gradient.data.detach(),
+                samples=gradient.samples,
+                components=gradient.components,
+            )
+
+        blocks.append(new_block)
     return TensorMap(tensor_map.keys, blocks)
 
 
@@ -82,137 +107,66 @@ class AtomisticDataset(torch.utils.data.Dataset):
         hypers,
         energies,
         forces=None,
-        normalization=None,
         do_gradients=False,
     ):
-        all_neighbor_species = Labels(
+        self._all_neighbor_species = Labels(
             names=["species_neighbor"],
             values=np.array(all_species, dtype=np.int32).reshape(-1, 1),
         )
-        all_center_species = Labels(
+        self._all_center_species = Labels(
             names=["species_center"],
             values=np.array(all_species, dtype=np.int32).reshape(-1, 1),
         )
 
         self.do_gradients = do_gradients
+        self.composition = []
+
+        self.composition_calculator = CompositionFeatures(all_species)
+        for frame_i, frame in enumerate(frames):
+            self.composition.append(self.compute_composition(frame, frame_i))
+
+        hypers_radial_spectrum = copy.deepcopy(hypers.get("radial_spectrum"))
         self.radial_spectrum = []
-        hypers_radial_spectrum = copy.deepcopy(hypers.get("radial_spectrum", None))
         if hypers_radial_spectrum is not None:
             hypers_radial_spectrum["max_angular"] = 0
-            calculator = SphericalExpansion(**hypers_radial_spectrum)
-            sum_structures = SumStructures()
+            self.radial_spectrum_calculator = Calculator(
+                SphericalExpansion(**hypers_radial_spectrum)
+            )
+            self.sum_structures = SumStructures()
 
-            sph_norm = 0.0
-            n_env = 0
             for frame_i, frame in enumerate(frames):
-                spherical_expansion = calculator.compute(
-                    frame, gradients=(["positions", "cell"] if do_gradients else [])
-                )
-                spherical_expansion.keys_to_properties(all_center_species)
-
-                # TODO: these don't hurt, but are confusing, let's remove them
-                spherical_expansion.components_to_properties("spherical_harmonics_m")
-                spherical_expansion.keys_to_properties("spherical_harmonics_l")
-                spherical_expansion.keys_to_properties(all_neighbor_species)
-                n_env += len(spherical_expansion.block(0).samples)
-                for k, b in spherical_expansion:
-                    sph_norm += ((b.values**2).sum()).item()
-                # sph_structure = summer(spherical_expansion)
+                system = as_torch_system(frame, positions_requires_grad=do_gradients)
                 self.radial_spectrum.append(
-                    sum_structures(_move_to_torch(spherical_expansion, frame_i))
+                    _detach_all_blocks(self.compute_radial_spectrum(system, frame_i))
                 )
-            if normalization is None:
-                self.radial_norm = None
-            else:
-                if type(normalization) is str and normalization == "automatic":
-                    self.radial_norm = 1.0 / np.sqrt(sph_norm / n_env)
-                else:
-                    self.radial_norm = normalization["radial_spectrum"]
-                for r in self.radial_spectrum:
-                    for k, b in r:
-                        b.values.data *= self.radial_norm
-                        if b.has_gradient("positions"):
-                            gradient = b.gradient("positions")
-                            view = gradient.data.view(gradient.data.dtype)
-                            view *= self.radial_norm
+
         else:
             self.radial_spectrum = [None] * len(frames)
 
         self.spherical_expansions = []
-        hypers_spherical_expansion = copy.deepcopy(
-            hypers.get("spherical_expansion", None)
-        )
+        hypers_spherical_expansion = copy.deepcopy(hypers.get("spherical_expansion"))
         if "radial_per_angular" in hypers_spherical_expansion:
             radial_per_angular = hypers_spherical_expansion.pop("radial_per_angular")
 
-            calculators = {}
+            self.spherical_expansion_calculator = {}
             for l, n in radial_per_angular.items():
                 new_hypers = copy.deepcopy(hypers_spherical_expansion)
                 new_hypers["max_angular"] = l
                 new_hypers["max_radial"] = n
-                calculators[l] = SphericalExpansion(**new_hypers)
-
-            for frame_i, frame in enumerate(frames):
-                spherical_expansion_by_l = {}
-                for l, calculator in calculators.items():
-                    spherical_expansion = calculator.compute(
-                        frame, gradients=(["positions", "cell"] if do_gradients else [])
-                    )
-                    spherical_expansion.keys_to_samples("species_center")
-                    spherical_expansion.keys_to_properties(all_neighbor_species)
-                    spherical_expansion_by_l[l] = spherical_expansion
-
-                self.spherical_expansions.append(
-                    _move_to_torch_by_l(spherical_expansion_by_l, frame_i)
+                new_hypers["single_l"] = True
+                self.spherical_expansion_calculator[l] = Calculator(
+                    SphericalExpansion(**new_hypers)
                 )
-
         else:
-            calculator = SphericalExpansion(**hypers_spherical_expansion)
+            self.spherical_expansion_calculator = Calculator(
+                SphericalExpansion(**hypers_spherical_expansion)
+            )
 
-            for frame_i, frame in enumerate(frames):
-                spherical_expansion = calculator.compute(
-                    frame, gradients=(["positions", "cell"] if do_gradients else [])
-                )
-                spherical_expansion.keys_to_samples("species_center")
-                spherical_expansion.keys_to_properties(all_neighbor_species)
-
-                self.spherical_expansions.append(
-                    _move_to_torch(spherical_expansion, frame_i)
-                )
-
-        if normalization is None:
-            self.spherical_expansion_norm = None
-        else:
-            if type(normalization) is str and normalization == "automatic":
-                spex_norm = 0.0
-                n_env = 0
-                for spex in self.spherical_expansions:
-                    n_env += len(spex.block(0).samples)
-                    for k, b in spex:
-                        spex_norm += ((b.values) ** 2).sum().item()
-
-                self.spherical_expansion_norm = 1.0 / np.sqrt(spex_norm / n_env)
-            else:
-                self.spherical_expansion_norm = normalization["spherical_expansion"]
-            for spex in self.spherical_expansions:
-                for k, b in spex:
-                    b.values.data *= self.spherical_expansion_norm
-                    if b.has_gradient("positions"):
-                        gradient = b.gradient("positions")
-                        view = gradient.data.view(gradient.data.dtype)
-                        view *= self.spherical_expansion_norm
-
-        self.composition = []
-        if all_species is not None:
-            # composition features are intrinsically normalized
-            comp_calc = CompositionFeatures(all_species)
-            for frame_i, frame in enumerate(frames):
-                comp = comp_calc(
-                    [frame], np.array([frame_i], dtype=np.int32).reshape(-1, 1)
-                )
-                self.composition.append(comp)
-        else:
-            self.composition = [None] * len(frames)
+        for frame_i, frame in enumerate(frames):
+            system = as_torch_system(frame, positions_requires_grad=do_gradients)
+            self.spherical_expansions.append(
+                _detach_all_blocks(self.compute_spherical_expansion(system, frame_i))
+            )
 
         assert isinstance(energies, torch.Tensor)
         assert energies.shape == (len(frames), 1)
@@ -227,6 +181,93 @@ class AtomisticDataset(torch.utils.data.Dataset):
         self.forces = forces
         self._getitemtime = 0
         self._collatetime = 0
+
+    def compute_composition(self, frame, frame_i):
+        return self.composition_calculator(
+            [frame], np.array([frame_i], dtype=np.int32).reshape(-1, 1)
+        )
+
+    def compute_radial_spectrum(self, system, system_i):
+        spherical_expansion = self.radial_spectrum_calculator(
+            system,
+            keep_forward_grad=self.do_gradients,
+        )
+        
+        # TODO: these don't hurt, but are confusing, let's remove them
+        spherical_expansion.keys_to_properties(self._all_neighbor_species)
+        spherical_expansion.keys_to_properties(self._all_center_species)
+        spherical_expansion.components_to_properties("spherical_harmonics_m")
+        spherical_expansion.keys_to_properties("spherical_harmonics_l")
+        
+
+        return self.sum_structures(_move_to_torch(spherical_expansion, system_i))
+
+    def compute_spherical_expansion(self, system, system_i):
+        if isinstance(self.spherical_expansion_calculator, dict):
+            spherical_expansion_by_l = {}
+
+            lkeys = []; lblocks = []
+            for l, calculator in self.spherical_expansion_calculator.items():
+
+                start = time()                
+                spherical_expansion = calculator(
+                    system,
+                    keep_forward_grad=self.do_gradients,
+                )
+                """
+def _move_to_torch_by_l(tensor_maps, structure_i):
+    keys = []
+    blocks = []
+    for l, tensor_map in tensor_maps.items():
+        l_blocks = tensor_map.block(spherical_harmonics_l=l)
+        if not hasattr(l_blocks, "__len__"):
+            l_blocks = [l_blocks]
+        l_keys = tensor_map.keys[
+            np.where(tensor_map.keys["spherical_harmonics_l"] == l)[0]
+        ]
+        for k, b in zip(l_keys, l_blocks):
+            keys.append(tuple(k))
+            blocks.append(_block_to_torch(b, structure_i))
+
+    return TensorMap(
+        Labels(tensor_map.keys.names, np.asarray(keys, dtype=np.int32)), blocks
+    )
+                """
+                lnames = spherical_expansion.keys.names
+                #print(spherical_expansion.keys, spherical_expansion.keys.names, l)
+                for lk, lb in spherical_expansion:                    
+                    if lk["spherical_harmonics_l"]==l:
+                        lkeys.append(tuple(lk));
+                        lblocks.append(lb.copy())
+
+                print ("calc ", time()-start)
+                #start = time()                
+                #spherical_expansion.keys_to_samples("species_center")
+                #spherical_expansion.keys_to_properties(self._all_neighbor_species)
+                #print ("keys_move ", time()-start)
+                #spherical_expansion_by_l[l] = spherical_expansion
+            start = time()                                            
+            spherical_expansion_sel = TensorMap(keys=Labels(names=lnames, values=np.asarray(lkeys, dtype=np.int32)),
+                    blocks=lblocks
+                    )
+            spherical_expansion_sel.keys_to_samples("species_center")
+            spherical_expansion_sel.keys_to_properties(self._all_neighbor_species)            
+            print("combined move", time()-start)
+            return _move_to_torch(spherical_expansion_sel, system_i)
+            start = time()
+            m2t = _move_to_torch_by_l(spherical_expansion_by_l, system_i)
+            print("totorch ", time()-start)
+            return m2t
+        else:
+            spherical_expansion = self.spherical_expansion_calculator(
+                system,
+                keep_forward_grad=self.do_gradients,
+            )
+            spherical_expansion.keys_to_samples("species_center")
+            spherical_expansion.keys_to_properties(self._all_neighbor_species)
+
+            return _move_to_torch(spherical_expansion, system_i)
+#pot, force, stress [[-992.09006198]] (125, 3) (3, 3)
 
     def __len__(self):
         return len(self.composition)

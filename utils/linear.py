@@ -12,6 +12,8 @@ class LinearModel(torch.nn.Module):
         super().__init__()
 
         self.regularizer = regularizer
+        if not isinstance(self.regularizer, list):
+            self.regularizer = [self.regularizer, self.regularizer]
 
         self.weights = None
 
@@ -48,11 +50,11 @@ class LinearModel(torch.nn.Module):
             n_atoms = np.sum(block.samples["structure"] == structure)
             n_atoms_per_structure.append(float(n_atoms))
 
-        energy_regularizer = (
-            torch.sqrt(torch.tensor(n_atoms_per_structure, device=energies.device))
-            * self.regularizer[0]
-            / delta
+        sqrt_n_atoms_per_structure = torch.sqrt(
+            torch.tensor(n_atoms_per_structure, device=energies.device)
         )
+
+        energy_regularizer = sqrt_n_atoms_per_structure * self.regularizer[0] / delta
 
         if forces is not None:
             gradient = block.gradient("positions")
