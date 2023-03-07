@@ -351,9 +351,6 @@ def main(datafile, parameters, device="cpu"):
         print("Beginning epoch", epoch)
         epoch_start = time.time() 
 
-        n_batches_in_energy_loader = len(train_dataloader_no_batch)
-        n_batches_in_force_loader = len(train_forces_dataloader_grad_no_batch)
-        assert n_batches_in_energy_loader == n_batches_in_force_loader 
 
         for (
             composition,
