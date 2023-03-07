@@ -452,17 +452,7 @@ def main(datafile, parameters, device="cpu"):
 
         epoch_time = time.time() - epoch_start
         
-        if epoch % 1 == 0:
-            
-            #TODO: This has to be removed or changed in Batch SGD
-            predicted, _ = model(
-                        composition,
-                        radial_spectrum,
-                        spherical_expansions,
-                        forward_forces=False,
-                    )   
-            train_mae = loss_mae(predicted, energies)                   
-            train_mae /= n_train + n_train_forces
+
             
 
             
@@ -518,6 +508,22 @@ def main(datafile, parameters, device="cpu"):
 
 
             scheduler.step(validation_loss)
+
+        
+        if epoch % 5 == 0:
+            
+            #TODO: This has to be removed or changed in Batch SGD
+            predicted, _ = model(
+                        composition,
+                        radial_spectrum,
+                        spherical_expansions,
+                        forward_forces=False,
+                    )   
+            
+            train_mae = loss_mae(predicted, energies)                   
+            train_mae /= n_train + n_train_forces
+
+
 
             predicted = []
             reference = []
