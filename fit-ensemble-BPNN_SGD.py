@@ -464,10 +464,7 @@ def main(datafile, parameters, device="cpu"):
             train_mae = loss_mae(predicted, energies)                   
             train_mae /= n_train + n_train_forces
             
-            predicted = []
-            reference = []
-            predicted_forces = []
-            reference_forces = []
+
             
             # --------- do the validation here -------
 
@@ -522,11 +519,10 @@ def main(datafile, parameters, device="cpu"):
 
             scheduler.step(validation_loss)
 
-
-
-
-
-
+            predicted = []
+            reference = []
+            predicted_forces = []
+            reference_forces = []
 
             # we can keep a full batch testing loader
             for (
@@ -543,6 +539,7 @@ def main(datafile, parameters, device="cpu"):
                     test_spherical_expansions,
                     forward_forces=True,
                 )
+
                 predicted.append(test_predicted_e.detach())
                 predicted_forces.append(test_predicted_f.detach())
                 reference_forces.append(test_forces)
