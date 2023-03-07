@@ -65,6 +65,8 @@ def main(datafile, parameters, device="cpu"):
 
     n_test = parameters["n_test"]
     n_train = parameters["n_train"]
+    n_validation = parameters["n_validation"]
+
     n_train_forces = parameters["n_train_forces"]
     all_species = parameters.get("species", [])
     if len(all_species) == 0:
@@ -90,10 +92,13 @@ def main(datafile, parameters, device="cpu"):
 
     train_frames = frames[:n_train]
     train_forces_frames = frames[n_train : n_train + n_train_forces]
+    validation_frames = frames[n_train + n_train_forces : n_train + n_train_forces + n_validation]
     test_frames = frames[-n_test:]
 
     train_energies, _ = extract_energy_forces(train_frames)
     train_f_energies, train_f_forces = extract_energy_forces(train_forces_frames)
+    validation_f_energies, validation_f_forces = extract_energy_forces(validation_frames)
+
     test_energies, test_forces = extract_energy_forces(test_frames)
 
 
@@ -140,8 +145,22 @@ def main(datafile, parameters, device="cpu"):
             train_f_forces,
             do_gradients=True,
         )
+        
+
+
     else:
         train_forces_dataset_grad = None
+       #val_forces_dataset_grad = None
+
+
+    val_dataset_grad = AtomisticDataset(
+            validation_frames,
+            all_species,
+            {"radial_spectrum": hypers_rs, "spherical_expansion": hypers_ps},
+            validation_f_energies,
+            validation_f_forces,
+            do_gradients=True,
+        )
 
     test_dataset_grad = AtomisticDataset(
         test_frames,
@@ -160,6 +179,8 @@ def main(datafile, parameters, device="cpu"):
         shuffle=True,
         device=device,
     )
+
+
 
     train_dataloader_single_frame = create_dataloader(
         train_dataset,
@@ -191,6 +212,13 @@ def main(datafile, parameters, device="cpu"):
     print("N batches train forces: {}".format(n_batches_forces))
 
     #Why? I do not understand
+    val_dataloader_grad = create_dataloader(
+        val_dataset_grad,
+        batch_size=n_validation,
+        shuffle=False,
+        device=device,
+    )
+
     test_dataloader_grad = create_dataloader(
         test_dataset_grad,
         batch_size=n_test,
@@ -303,6 +331,8 @@ def main(datafile, parameters, device="cpu"):
         model.parameters(),
         lr=parameters.get("learning_rate", 0.001),
     )
+
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer,factor=0.5,verbose=True,patience=25)
 
 
     # saves initial model dict
@@ -439,6 +469,65 @@ def main(datafile, parameters, device="cpu"):
             predicted_forces = []
             reference_forces = []
             
+            # --------- do the validation here -------
+
+        for (
+                f_composition,
+                f_radial_spectrum,
+                f_spherical_expansions,
+                f_energies,
+                f_forces,
+            ) in val_dataloader_grad:
+
+
+            optimizer.zero_grad()
+            validation_loss = torch.zeros(size=(1,), device=device)
+            assert high_mem
+
+            predicted, _ = model(
+                composition,
+                radial_spectrum,
+                spherical_expansions,
+                forward_forces=False,
+            )
+
+            validation_loss += loss_mse(predicted, energies)
+
+            if n_validation != 0:
+                
+                f_predicted_e, f_predicted_f = model(
+                    f_composition,
+                    f_radial_spectrum,
+                    f_spherical_expansions,
+                    forward_forces=True,
+                )
+
+                validation_loss += loss_mse(f_predicted_f, f_forces)
+
+            if model.composition_model is not None:
+                validation_loss += COMPOSITION_REGULARIZER * torch.linalg.norm(
+                    model.composition_model.weights
+                )
+
+            if model.nn_model is not None:
+                validation_loss += NN_REGULARIZER * sum(
+                    (p**2).sum() for p in model.nn_model.parameters()
+                )
+
+            energy_loss = validation_loss.item()
+
+            if n_train_forces != 0:
+                validation_loss += FORCES_LOSS_WEIGHT * validation_loss
+
+
+            scheduler.step(validation_loss)
+
+
+
+
+
+
+
             # we can keep a full batch testing loader
             for (
                 test_composition,
