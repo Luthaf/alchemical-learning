@@ -11,6 +11,10 @@ Writing down some of the things that are necessary to make this code run.
     Also, check that cudNN and cuda are installed
          conda install -c anaconda cudnn 
          conda install cuda -c nvidia
+         
+         
+         conda install -c conda-forge gxx_linux-64
+         (and gcc if it is not set/part of the environment)
 
 3rd install the specific git commits (current requirements file does NOT work)
     pip install git+https://github.com/lab-cosmo/equistore.git@6cd0c9a518cc1b6ca99cfa30df2a070ed1f6fe0d
