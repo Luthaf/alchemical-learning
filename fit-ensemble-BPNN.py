@@ -4,6 +4,7 @@ import os
 import sys
 import time
 from datetime import datetime
+import random
 
 import ase.io
 import numpy as np
@@ -34,6 +35,8 @@ def loss_mae(predicted, actual):
 def loss_mse(predicted, actual):
     return torch.mean((predicted.flatten() - actual.flatten()) ** 2)
 
+def loss_mse_sum(predicted, actual):
+    return torch.sum((predicted.flatten() - actual.flatten()) ** 2)
 
 def loss_rmse(predicted, actual):
     return torch.sqrt(loss_mse(predicted, actual))
@@ -84,6 +87,11 @@ def main(datafile, parameters, device="cpu"):
         print("Try to put the following line in the json file:")
         print("\t\"species\": ", all_species_from_data, ",", sep='')
         sys.exit(1)
+    
+    idx = [i for i in range(len(frames))]
+    random.Random(parameters.get("seed")).shuffle(idx)
+    random.Random(parameters.get("seed")).shuffle(frames)
+    np.save("idx",idx)
 
     train_frames = frames[:n_train]
     train_forces_frames = frames[n_train : n_train + n_train_forces]
@@ -193,8 +201,10 @@ def main(datafile, parameters, device="cpu"):
 
     # --------- INITIALIZE MODEL --------- #
     print("Initializing model")
-    print("Setting seed to: {}".format(parameters.get("seed")))
-    torch.manual_seed(int(parameters.get("seed")))
+    manual_seed = parameters.get("seed")
+    print(type(manual_seed))
+    print("Setting seed to: {}".format(manual_seed))
+    torch.manual_seed(int(manual_seed))
 
     with torch.no_grad():
         for (
@@ -216,10 +226,8 @@ def main(datafile, parameters, device="cpu"):
                     self.nn =   torch.nn.Sequential(
                                 torch.nn.Linear(self.dim_input, self.layer_size),
                                 torch.nn.Tanh(),
-                                torch.nn.LayerNorm(self.layer_size),
                                 torch.nn.Linear(self.layer_size, self.layer_size),
                                 torch.nn.Tanh(),
-                                torch.nn.LayerNorm(self.layer_size),
                                 torch.nn.Linear(self.layer_size, self.dim_output),
                                 )
 
@@ -313,7 +321,7 @@ def main(datafile, parameters, device="cpu"):
                 spherical_expansions,
                 forward_forces=False,
             )
-            loss += loss_mse(predicted, energies)
+            loss += loss_mse_sum(predicted, energies)
 
             if n_train_forces != 0:
                 f_predicted_e, f_predicted_f = model(
@@ -323,12 +331,12 @@ def main(datafile, parameters, device="cpu"):
                     forward_forces=True,
                 )
 
-                loss += loss_mse(f_predicted_e, f_energies)
-                loss_force += loss_mse(f_predicted_f, f_forces)
+                loss += loss_mse_sum(f_predicted_e, f_energies)
+                loss_force += loss_mse_sum(f_predicted_f, f_forces)
 
             loss /= n_train + n_train_forces
             loss_force /= n_train_forces
-
+            
             if model.composition_model is not None:
                 loss += COMPOSITION_REGULARIZER * torch.linalg.norm(
                     model.composition_model.weights
@@ -354,7 +362,7 @@ def main(datafile, parameters, device="cpu"):
         loss = optimizer.step(single_step)
 
         epoch_time = time.time() - epoch_start
-        if epoch % 1 == 0:
+        if epoch % 5 == 0:
             predicted, _ = model(
                         composition,
                         radial_spectrum,
