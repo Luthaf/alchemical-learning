@@ -212,11 +212,12 @@ class AtomisticDataset(torch.utils.data.Dataset):
         )
         
         # TODO: these don't hurt, but are confusing, let's remove them
-        spherical_expansion.keys_to_properties(self._all_neighbor_species)
-        spherical_expansion.keys_to_properties(self._all_center_species)
-        spherical_expansion.components_to_properties("spherical_harmonics_m")
-        spherical_expansion.keys_to_properties("spherical_harmonics_l")
-
+        print(spherical_expansion)
+        spherical_expansion = spherical_expansion.keys_to_samples('species_center')
+        spherical_expansion = spherical_expansion.keys_to_properties('species_neighbor')
+        spherical_expansion = spherical_expansion.components_to_properties("spherical_harmonics_m")
+        spherical_expansion = spherical_expansion.keys_to_properties("spherical_harmonics_l")
+        print(spherical_expansion)
         return _move_to_torch(spherical_expansion, system_i)
 
     def compute_spherical_expansion(self, system, system_i):
@@ -280,10 +281,11 @@ def _move_to_torch_by_l(tensor_maps, structure_i):
                 system,
                 keep_forward_grad=self.do_gradients,
             )
-            spherical_expansion.keys_to_samples("species_center")
-            spherical_expansion.keys_to_properties(self._all_neighbor_species_1)
-            spherical_expansion.keys_to_properties(self._all_neighbor_species_2)
-
+            print(spherical_expansion)
+            spherical_expansion = spherical_expansion.keys_to_samples("species_center")
+            spherical_expansion = spherical_expansion.keys_to_properties("species_neighbor_1")
+            spherical_expansion = spherical_expansion.keys_to_properties("species_neighbor_2")
+            print(spherical_expansion)
             return _move_to_torch(spherical_expansion, system_i)
 #pot, force, stress [[-992.09006198]] (125, 3) (3, 3)
 
