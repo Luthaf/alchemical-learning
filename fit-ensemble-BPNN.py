@@ -14,6 +14,14 @@ from utils.combine import UnitCombineSpecies, CombineSpecies
 from utils.dataset import AtomisticDataset, create_dataloader
 from utils.model import AlchemicalModel, SoapBpnn
 
+import numpy as np
+import scipy as sp
+import scipy.optimize
+from scipy.special import jv
+from scipy.special import spherical_jn as j_l
+
+from rascaline import generate_splines
+
 try:
     profile
 except NameError:
@@ -67,6 +75,9 @@ def main(datafile, parameters, device="cpu"):
     n_train = parameters["n_train"]
     n_train_forces = parameters["n_train_forces"]
     all_species = parameters.get("species", [])
+
+    use_splines = parameters.get("splines", None)
+
     if len(all_species) == 0:
         print("Warning: A list of species is not found! Please, set it in the json file!")
 
@@ -109,10 +120,97 @@ def main(datafile, parameters, device="cpu"):
     
     print("Computing representations")
     hypers_ps = parameters["hypers_ps"]
+
+    if use_splines is True:
+    
+        max_angular = hypers_ps["max_angular"]
+        max_radial = hypers_ps["max_radial"]
+        cutoff = hypers_ps["cutoff"]
+
+        def Jn(r, n):
+            return np.sqrt(np.pi / (2 * r)) * jv(n + 0.5, r)
+
+
+        def Jn_zeros(n, nt):
+            zeros_j = np.zeros((n + 1, nt), dtype=np.float64)
+            zeros_j[0] = np.arange(1, nt + 1) * np.pi
+            points = np.arange(1, nt + n + 1) * np.pi
+            roots = np.zeros(nt + n, dtype=np.float64)
+            for i in range(1, n + 1):
+                for j in range(nt + n - i):
+                    roots[j] = scipy.optimize.brentq(Jn, points[j], points[j + 1], (i,))
+                points = roots
+                zeros_j[i][:nt] = roots[:nt]
+            return zeros_j
+
+
+        z_ln = Jn_zeros(max_angular, max_radial)
+        z_nl = z_ln.T
+
+
+        def R_nl(n, el, r):
+            # Un-normalized LE radial basis functions
+            return j_l(el, z_nl[n, el] * r / cutoff)
+
+
+        def N_nl(n, el):
+            # Normalization factor for LE basis functions, excluding the a**(-1.5) factor
+            def function_to_integrate_to_get_normalization_factor(x):
+                return j_l(el, x) ** 2 * x**2
+
+            integral, _ = sp.integrate.quadrature(
+                function_to_integrate_to_get_normalization_factor, 0.0, z_nl[n, el]
+            )
+            return (1.0 / z_nl[n, el] ** 3 * integral) ** (-0.5)
+
+
+        def laplacian_eigenstate_basis(n, el, r):
+            R = np.zeros_like(r)
+            for i in range(r.shape[0]):
+                R[i] = R_nl(n, el, r[i])
+            return N_nl(n, el) * R * cutoff ** (-1.5)
+
+        normalization_check_integral, _ = sp.integrate.quadrature(
+            lambda x: laplacian_eigenstate_basis(1, 1, x) ** 2 * x**2,
+            0.0,
+            cutoff,
+        )
+        print(f"Normalization check (needs to be close to 1): {normalization_check_integral}")
+
+
+        def laplacian_eigenstate_basis_derivative(n, el, r):
+            delta = 1e-6
+            all_derivatives_except_at_zero = (
+                laplacian_eigenstate_basis(n, el, r[1:] + delta)
+                - laplacian_eigenstate_basis(n, el, r[1:] - delta)
+            ) / (2.0 * delta)
+            derivative_at_zero = (
+                laplacian_eigenstate_basis(n, el, np.array([delta / 10.0]))
+                - laplacian_eigenstate_basis(n, el, np.array([0.0]))
+            ) / (delta / 10.0)
+            return np.concatenate([derivative_at_zero, all_derivatives_except_at_zero])
+
+        spline_points = generate_splines(
+            laplacian_eigenstate_basis,
+            laplacian_eigenstate_basis_derivative,
+            max_radial,
+            max_angular,
+            cutoff,
+            requested_accuracy=1e-5,
+        )
+    
+
+        hypers_ps["radial_basis"] =  {"TabulatedRadialIntegral": {
+                                            "points": spline_points,
+                                            }}
+
+
     if "radial_per_angular" in hypers_ps:
         hypers_ps["radial_per_angular"] = {
             int(k): v for k, v in hypers_ps["radial_per_angular"].items()
         }
+    
+    
     hypers_rs = parameters.get("hypers_rs")
 
     # check that hypers_ps and hypers_rs have same cutoff radius
